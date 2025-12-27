@@ -3,14 +3,24 @@ import sys
 import time
 import logging
 from openai import OpenAI
-from analyst_core import fetch_stock_data
+# === 使用带缓存的四维数据抓取（性能提升100倍+） ===
+from analyst_integration_cached import fetch_stock_data
 from analyst_brain_v2 import AnalystBrainV2 as AnalystBrain  # V2: 量化增强版（阈值3分）
 from stock_finder import smart_stock_query  # 智能股票查询
 from datetime import datetime
 import threading
 import argparse
 import markdown
-from weasyprint import HTML, CSS
+
+# PDF导出功能（可选）
+try:
+    from weasyprint import HTML, CSS
+    from weasyprint.text.fonts import FontConfiguration
+    HAS_WEASYPRINT = True
+except (ImportError, OSError) as e:
+    HAS_WEASYPRINT = False
+    logging.warning(f"⚠️  PDF导出功能不可用: {e}")
+    logging.warning("   监控和分析功能仍可正常使用")
 
 # 配置日志
 logging.basicConfig(
@@ -60,24 +70,19 @@ DEFAULT_MODEL = active_config["model"]
 # === 自选股列表 ===
 # My Watchlist
 MY_WATCHLIST = [
-    # --- 深市 ---
-    {"code": "002028", "name": "思源电气"},
-    {"code": "002475", "name": "立讯精密"},
-    {"code": "002920", "name": "德赛西威"},
+    # --- 个股 ---
     {"code": "002683", "name": "广东宏大"},
-    {"code": "003816", "name": "中国广核"},
-    {"code": "300308", "name": "中际旭创"},
-    # --- 沪市 ---
-    {"code": "600030", "name": "中信证券"},
-    {"code": "600036", "name": "招商银行"},
-    {"code": "600276", "name": "恒瑞医药"},
-    {"code": "600363", "name": "联创光电"},
-    {"code": "600519", "name": "贵州茅台"},
+    {"code": "002179", "name": "中航光电"},
+    {"code": "002049", "name": "紫光国微"},
     {"code": "688122", "name": "西部超导"},
-    # --- ETF ---
-    {"code": "159206", "name": "卫星ETF"},
-    {"code": "159857", "name": "光伏ETF"},
-    {"code": "164906", "name": "中概互联网LOF"},
+    {"code": "600312", "name": "平高电气"},
+    {"code": "300776", "name": "帝尔激光"},
+    # --- 指数 ---
+    {"code": "399050", "name": "中证互联网"},
+    {"code": "399441", "name": "国证生物医药"},
+    {"code": "399971", "name": "中证光伏"},
+    {"code": "399976", "name": "中证新能源汽车"},
+    {"code": "000932", "name": "中证消费"},
 ]
 
 # Dad's Watchlist
@@ -100,10 +105,12 @@ DAD_WATCHLIST = [
 
 # Erin's Watchlist
 ERIN_WATCHLIST = [
-    {"code": "002683", "name": "广东宏大"},
+    {"code": "300059", "name": "东方财富"},  # 互联网券商龙头
     {"code": "601088", "name": "中国神华"},
     {"code": "600901", "name": "江苏金租"},
     {"code": "600690", "name": "海尔智家"},
+    {"code": "002475", "name": "立讯精密"},
+    {"code": "688122", "name": "西部超导"},
 ]
 
 # Watchlist 映射
@@ -134,7 +141,7 @@ def get_user_choice_with_timeout(timeout=30):
     print("\n" + "="*60)
     print("📋 请选择要分析的 Watchlist：")
     print("="*60)
-    print("  [1] my    - My Watchlist      (15 只股票)")
+    print("  [1] my    - My Watchlist      (11 只股票)")
     print("  [2] dad   - Dad's Watchlist   (10 只股票)")
     print("  [3] erin  - Erin's Watchlist  (4 只股票)")
     print("="*60)
@@ -200,6 +207,12 @@ def generate_pdf_from_markdown(md_filepath):
     Returns:
         PDF 文件路径，失败则返回 None
     """
+    # 检查 PDF 导出功能是否可用
+    if not HAS_WEASYPRINT:
+        logging.warning("⚠️  PDF导出功能不可用，请安装系统依赖")
+        logging.info(f"   Markdown报告已保存: {md_filepath}")
+        return None
+
     try:
         # 读取 Markdown 文件
         with open(md_filepath, 'r', encoding='utf-8') as f:
@@ -211,34 +224,40 @@ def generate_pdf_from_markdown(md_filepath):
             extensions=['extra', 'tables', 'nl2br']
         )
 
-        # 添加 CSS 样式（支持中文）
+        # 添加 CSS 样式（使用 Noto Sans CJK SC 确保中文正确显示）
         css_style = """
         @page {
             size: A4;
             margin: 2cm;
         }
         body {
-            font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            font-family: "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
             font-size: 11pt;
             line-height: 1.6;
             color: #333;
+        }
+        h1, h2, h3, h4, h5, h6 {
+            font-family: "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "PingFang SC", sans-serif;
         }
         h1 {
             color: #2c3e50;
             border-bottom: 3px solid #3498db;
             padding-bottom: 10px;
-            font-size: 24pt;
+            font-size: 22pt;
+            font-weight: bold;
         }
         h2 {
             color: #34495e;
             border-bottom: 2px solid #95a5a6;
             padding-bottom: 5px;
             margin-top: 20px;
-            font-size: 18pt;
+            font-size: 16pt;
+            font-weight: bold;
         }
         h3 {
             color: #555;
-            font-size: 14pt;
+            font-size: 13pt;
+            font-weight: bold;
         }
         blockquote {
             background-color: #f8f9fa;
@@ -250,7 +269,7 @@ def generate_pdf_from_markdown(md_filepath):
             background-color: #f4f4f4;
             padding: 2px 6px;
             border-radius: 3px;
-            font-family: "Monaco", "Courier New", monospace;
+            font-family: "Noto Sans Mono CJK SC", "Monaco", "Courier New", monospace;
         }
         strong {
             color: #e74c3c;
@@ -277,6 +296,10 @@ def generate_pdf_from_markdown(md_filepath):
         th {
             background-color: #3498db;
             color: white;
+            font-weight: bold;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
         }
         """
 
@@ -297,8 +320,11 @@ def generate_pdf_from_markdown(md_filepath):
         # 生成 PDF 文件路径
         pdf_filepath = md_filepath.replace('.md', '.pdf')
 
-        # 转换为 PDF
-        HTML(string=full_html).write_pdf(pdf_filepath)
+        # 配置字体以确保中文正确嵌入
+        font_config = FontConfiguration()
+
+        # 转换为 PDF（嵌入字体）
+        HTML(string=full_html).write_pdf(pdf_filepath, font_config=font_config)
 
         logging.info(f"✅ PDF报告已生成: {pdf_filepath}")
         return pdf_filepath
@@ -307,7 +333,7 @@ def generate_pdf_from_markdown(md_filepath):
         logging.error(f"❌ PDF生成失败: {e}")
         return None
 
-def run_single_stock_mode(stock_code, stock_name=None, analysis_mode="auto"):
+def run_single_stock_mode(stock_code, stock_name=None, analysis_mode="auto", prompt_version="professional"):
     """
     运行单个股票查询模式
 
@@ -315,6 +341,7 @@ def run_single_stock_mode(stock_code, stock_name=None, analysis_mode="auto"):
         stock_code: 股票代码或名称（支持智能识别）
         stock_name: 股票名称（可选）
         analysis_mode: 分析模式 ('fast' | 'deep' | 'auto')
+        prompt_version: Prompt风格 ('professional' | 'value_first' | 'quant_hybrid')
     """
     # 🎯 智能识别：如果用户输入的是名称或模糊关键词，自动查找代码
     if stock_name is None or not stock_code.isdigit():
@@ -341,7 +368,7 @@ def run_single_stock_mode(stock_code, stock_name=None, analysis_mode="auto"):
     brain = None
     if analysis_mode in ['deep', 'auto']:
         # 可选模型：deepseek-v3.2（深度推理，慢）| qwen-max（快速，稳定）
-        brain = AnalystBrain(model="deepseek-v3.2")  # 如遇超时可改为 qwen-max
+        brain = AnalystBrain(model="deepseek-v3.2", prompt_version=prompt_version)  # 如遇超时可改为 qwen-max
 
     print(f"\n{'='*60}")
     print(f"🔍 单股查询模式")
@@ -432,6 +459,10 @@ def run_single_stock_mode(stock_code, stock_name=None, analysis_mode="auto"):
         report_dir = os.path.join(script_dir, "Report", date_folder)
         os.makedirs(report_dir, exist_ok=True)
 
+        # 根据时间确定是晨报还是晚报
+        hour = now.hour
+        report_period = "晨报" if hour < 12 else "晚报"
+
         # 文件名：日期_时间_股票名称_模式.md（更清晰）
         date_prefix = now.strftime('%y%m%d')
         time_prefix = now.strftime('%H%M%S')
@@ -439,7 +470,7 @@ def run_single_stock_mode(stock_code, stock_name=None, analysis_mode="auto"):
         filename = os.path.join(report_dir, f"{date_prefix}_{time_prefix}_{stock_name}_{mode_suffix}.md")
 
         with open(filename, "w", encoding="utf-8") as f:
-            f.write(f"# 个股分析报告: {stock_name} ({stock_code})\n\n")
+            f.write(f"# {stock_name}（{stock_code}）投资分析{report_period}\n\n")
             f.write(f"> 生成时间: {now.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
             f.write(f"> 分析模式: {analysis_label}\n\n")
             if use_deep_analysis:
@@ -464,13 +495,14 @@ def run_single_stock_mode(stock_code, stock_name=None, analysis_mode="auto"):
     except Exception as e:
         logging.error(f"❌ AI分析失败: {e}")
 
-def run_monitor_mode(watchlist_name="my", analysis_mode="fast"):
+def run_monitor_mode(watchlist_name="my", analysis_mode="fast", prompt_version="professional"):
     """
     运行监控模式
 
     Args:
         watchlist_name: watchlist 名称 ('my', 'dad', 'erin')
         analysis_mode: 分析模式 ('fast' 快速模式 | 'deep' 深度模式 | 'auto' 智能触发)
+        prompt_version: Prompt风格 ('professional' | 'value_first' | 'quant_hybrid')
     """
     watchlist = WATCHLIST_MAP.get(watchlist_name, MY_WATCHLIST)
     watchlist_display = {
@@ -483,8 +515,8 @@ def run_monitor_mode(watchlist_name="my", analysis_mode="fast"):
     brain = None
     if analysis_mode in ['deep', 'auto']:
         # 可选模型：deepseek-v3.2（深度推理，慢）| qwen-max（快速，稳定）
-        brain = AnalystBrain(model="deepseek-v3.2")  # 如遇超时可改为 qwen-max
-        logging.info("🧠 Brain 层已激活（深度分析模式）")
+        brain = AnalystBrain(model="deepseek-v3.2", prompt_version=prompt_version)  # 如遇超时可改为 qwen-max
+        logging.info(f"🧠 Brain 层已激活（深度分析模式, Prompt: {prompt_version}）")
 
     analysis_mode_display = {
         "fast": "快速模式 (Worker Layer)",
@@ -492,16 +524,27 @@ def run_monitor_mode(watchlist_name="my", analysis_mode="fast"):
         "auto": "智能模式 (自动触发 Brain)"
     }.get(analysis_mode, "未知模式")
 
+    prompt_version_display = {
+        "professional": "专业分析师 (机构研报风格)",
+        "value_first": "价值优先 (长期投资视角)",
+        "quant_hybrid": "量化混合 (多因子评分)"
+    }.get(prompt_version, prompt_version)
+
     print("\n🛡️ 启动【多策略监控模式】...")
     print(f"📅 日期: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"🤖 Worker模型: {ACTIVE_MODEL.upper()} ({DEFAULT_MODEL}) - {active_config['description']}")
     if brain:
         print(f"🧠 Brain模型: {brain.model}")
+        print(f"📝 Prompt风格: {prompt_version_display}")
     print(f"⚙️  分析模式: {analysis_mode_display}")
     print(f"📋 选择列表: {watchlist_display}")
     print(f"📊 监控标的: {len(watchlist)} 只\n")
 
-    report_content = f"# 每日投资晨报 ({datetime.now().strftime('%Y-%m-%d')})\n\n"
+    # 根据时间确定是晨报还是晚报
+    current_hour = datetime.now().hour
+    report_period = "晨报" if current_hour < 12 else "晚报"
+
+    report_content = f"# 每日投资{report_period}（{datetime.now().strftime('%Y-%m-%d')}）\n\n"
     report_content += f"> 本报告由AI自动生成，仅供参考，不构成投资建议\n\n"
     report_content += f"> **Watchlist**: {watchlist_display}\n\n"
     report_content += f"> **分析模式**: {analysis_mode_display}\n\n"
@@ -688,8 +731,75 @@ if __name__ == "__main__":
         default='fast',
         help='分析模式：fast=快速(仅Worker) | deep=深度(Worker+Brain) | auto=智能触发 (默认: fast)'
     )
+    parser.add_argument(
+        '--prompt-version',
+        choices=['professional', 'value_first', 'quant_hybrid'],
+        default='professional',
+        help='Prompt风格：professional=机构研报 | value_first=价值优先 | quant_hybrid=量化评分 (默认: professional)'
+    )
+    parser.add_argument(
+        '--valuation',
+        metavar='CODE_OR_NAME',
+        help='快速估值分析模式，输入股票代码或名称，如 "600519" 或 "茅台"'
+    )
 
     args = parser.parse_args()
+
+    # === 快速估值分析模式 ===
+    if args.valuation:
+        from valuation_analyzer import ValuationAnalyzer
+
+        # 智能识别股票代码
+        stock_code, stock_name = smart_stock_query(args.valuation)
+        if stock_code is None:
+            print("❌ 无法识别股票代码，请检查输入")
+            sys.exit(1)
+
+        print(f"\n{'='*60}")
+        print(f"📊 快速估值分析模式")
+        print(f"📅 日期: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"🎯 标的: {stock_name} ({stock_code})")
+        print(f"{'='*60}\n")
+
+        # 执行估值分析
+        analyzer = ValuationAnalyzer()
+        metrics, summary = analyzer.analyze(stock_code, stock_name)
+
+        # 显示估值摘要
+        print(summary)
+        print("")
+
+        # 生成 Prompt 并调用 AI
+        print(f"🧠 正在调用 DeepSeek 进行深度估值分析...\n")
+        prompt = analyzer.generate_llm_prompt(metrics)
+
+        # 使用 DeepSeek 模型（通过 DashScope）
+        analysis = call_ai(prompt, model="deepseek-v3.2")
+
+        print(f"{'='*60}")
+        print("AI 估值分析报告:")
+        print(f"{'='*60}\n")
+        print(analysis)
+        print(f"\n{'='*60}\n")
+
+        # 保存报告
+        now = datetime.now()
+        date_folder = now.strftime('%y%m%d')
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        report_dir = os.path.join(script_dir, "Report", date_folder)
+        os.makedirs(report_dir, exist_ok=True)
+
+        filename = os.path.join(report_dir, f"{now.strftime('%y%m%d_%H%M%S')}_{stock_name}_估值分析.md")
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(f"# {stock_name}（{stock_code}）快速估值分析\n\n")
+            f.write(f"> 生成时间: {now.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            f.write(summary)
+            f.write("\n\n---\n\n")
+            f.write("## AI 深度分析\n\n")
+            f.write(analysis)
+
+        print(f"✅ 报告已保存: {filename}")
+        sys.exit(0)
 
     # === 单股查询模式 ===
     if args.stock:
@@ -701,7 +811,7 @@ if __name__ == "__main__":
             stock_name = None
 
         print(f"🔍 启动单股查询模式: {args.stock}")
-        run_single_stock_mode(stock_code.strip(), stock_name.strip() if stock_name else None, args.analysis_mode)
+        run_single_stock_mode(stock_code.strip(), stock_name.strip() if stock_name else None, args.analysis_mode, args.prompt_version)
         sys.exit(0)
 
     # === Watchlist 监控模式 ===
@@ -719,4 +829,4 @@ if __name__ == "__main__":
         selected_watchlist = get_user_choice_with_timeout(timeout=30)
 
     # 运行监控模式
-    run_monitor_mode(watchlist_name=selected_watchlist, analysis_mode=args.analysis_mode)
+    run_monitor_mode(watchlist_name=selected_watchlist, analysis_mode=args.analysis_mode, prompt_version=args.prompt_version)

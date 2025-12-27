@@ -1,0 +1,15 @@
+# API依赖包
+flask>=3.0.0
+flask-cors>=4.0.0
+flask-sqlalchemy>=3.0.0
+flask-jwt-extended>=4.5.0
+
+# 限流
+flask-limiter>=3.5.0
+
+# 数据库
+pymysql>=1.1.0
+
+# 其他工具
+python-dotenv>=1.0.0
+requests>=2.31.0

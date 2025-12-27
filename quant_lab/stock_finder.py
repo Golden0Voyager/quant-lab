@@ -39,33 +39,57 @@ class StockFinder:
         print("📥 正在获取最新股票列表...")
         self._fetch_and_cache_stock_list()
 
-    def _fetch_and_cache_stock_list(self):
-        """从 AkShare 获取股票列表并缓存"""
-        try:
-            # 获取 A 股列表
-            df_a = ak.stock_info_a_code_name()
+    def _fetch_and_cache_stock_list(self, max_retries=3):
+        """从 AkShare 获取股票列表并缓存（带重试机制）"""
+        import time
 
-            # 转换为字典列表
-            self.stock_list = []
-            for _, row in df_a.iterrows():
-                self.stock_list.append({
-                    'code': row['code'],
-                    'name': row['name']
-                })
+        for attempt in range(max_retries):
+            try:
+                # 获取 A 股列表
+                df_a = ak.stock_info_a_code_name()
 
-            # 保存缓存
-            cache_data = {
-                'date': datetime.now().isoformat(),
-                'data': self.stock_list
-            }
-            with open(self.cache_file, 'w', encoding='utf-8') as f:
-                json.dump(cache_data, f, ensure_ascii=False, indent=2)
+                # 转换为字典列表
+                self.stock_list = []
+                for _, row in df_a.iterrows():
+                    self.stock_list.append({
+                        'code': row['code'],
+                        'name': row['name']
+                    })
 
-            print(f"✅ 已缓存 {len(self.stock_list)} 只股票信息")
+                # 保存缓存
+                cache_data = {
+                    'date': datetime.now().isoformat(),
+                    'data': self.stock_list
+                }
+                with open(self.cache_file, 'w', encoding='utf-8') as f:
+                    json.dump(cache_data, f, ensure_ascii=False, indent=2)
 
-        except Exception as e:
-            print(f"⚠️  获取股票列表失败: {e}")
-            self.stock_list = []
+                print(f"✅ 已缓存 {len(self.stock_list)} 只股票信息")
+                return  # 成功，退出
+
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 2  # 递增等待时间
+                    print(f"⚠️  获取失败，{wait_time}秒后重试 ({attempt + 1}/{max_retries})...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"⚠️  获取股票列表失败: {e}")
+                    # 尝试加载过期缓存作为备用
+                    self._load_expired_cache()
+
+    def _load_expired_cache(self):
+        """加载过期缓存作为备用（网络失败时）"""
+        if os.path.exists(self.cache_file):
+            try:
+                with open(self.cache_file, 'r', encoding='utf-8') as f:
+                    cache_data = json.load(f)
+                    self.stock_list = cache_data['data']
+                    cache_date = datetime.fromisoformat(cache_data['date'])
+                    print(f"📋 已加载备用缓存（{len(self.stock_list)}只，更新于{cache_date.strftime('%Y-%m-%d')}）")
+                    return
+            except Exception:
+                pass
+        self.stock_list = []
 
     def find(self, query):
         """

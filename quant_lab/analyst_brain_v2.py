@@ -6,6 +6,7 @@
 2. 多维度技术信号（突破+成交量）
 3. 分级触发机制（轻度/中度/重度）
 4. 回测友好的设计
+5. 支持多版本Prompt (value_first/quant_hybrid/professional)
 """
 
 import os
@@ -15,14 +16,27 @@ import re
 from openai import OpenAI
 from datetime import datetime, timedelta
 
+# 导入新的 Prompt 构建函数
+from analyst_integration import build_enhanced_prompt
+
 logger = logging.getLogger(__name__)
 
 
 class AnalystBrainV2:
     """决策层 V2.0 - 量化增强版"""
 
-    def __init__(self, model="deepseek-v3.2", api_key=None, base_url=None):
+    def __init__(self, model="deepseek-v3.2", api_key=None, base_url=None, prompt_version="professional"):
+        """
+        初始化 Brain V2
+
+        Args:
+            model: 使用的 LLM 模型
+            api_key: API Key
+            base_url: API Base URL
+            prompt_version: Prompt 版本 (value_first/quant_hybrid/professional)
+        """
         self.model = model
+        self.prompt_version = prompt_version
         self.api_key = api_key or os.getenv("DASHSCOPE_API_KEY")
         self.base_url = base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1"
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url, timeout=180.0)  # 增加到3分钟
@@ -286,21 +300,25 @@ class AnalystBrainV2:
             return f"{match.group(1)}元/股"
         return "详见公告"
 
-    def deep_analyze_stock(self, stock_data):
+    def deep_analyze_stock(self, stock_data, prompt_version=None):
         """
         调用Brain进行深度分析
 
         Args:
             stock_data: 从 Worker 层获取的结构化数据
+            prompt_version: Prompt版本 (可选，不指定则使用实例默认版本)
 
         Returns:
             深度分析报告
         """
-        # 构建深度分析 prompt
-        prompt = self._build_deep_analysis_prompt(stock_data)
+        # 使用指定版本或默认版本
+        version = prompt_version or self.prompt_version
+
+        # 使用新的 Prompt 构建函数
+        prompt = build_enhanced_prompt(stock_data, analysis_type="brain", prompt_version=version)
 
         # 调用强推理模型
-        logger.info(f"🧠 Brain V2深度分析: {stock_data['name']} (模型: {self.model})")
+        logger.info(f"🧠 Brain V2深度分析: {stock_data['name']} (模型: {self.model}, Prompt: {version})")
 
         for attempt in range(3):
             try:
