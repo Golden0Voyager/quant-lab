@@ -49,7 +49,10 @@ quant_cache.db
 .stock_list_cache.json
 
 # 运行时数据（指数历史CSV等，可重新生成）
-all_stock_data/data/
+all_stock_data/
+
+# 个人自选股列表
+watchlists.json
 
 # 日志文件
 *.log
