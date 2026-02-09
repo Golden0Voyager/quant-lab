@@ -3,7 +3,7 @@
 快速测试单只股票
 用法: python quick_test.py
 """
-from analyst_core import fetch_stock_data
+from analyst_base import fetch_stock_data
 
 # 👇 修改这里测试你想要的股票
 TEST_CODE = "002920"   # 股票代码

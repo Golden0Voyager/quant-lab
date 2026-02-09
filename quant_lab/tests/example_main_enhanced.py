@@ -11,7 +11,7 @@ from analyst_integration import (
     evaluate_enhanced_signals,
     build_enhanced_prompt
 )
-from analyst_brain_v2 import AnalystBrainV2 as AnalystBrain
+from analyst_brain import AnalystBrain
 
 # 配置日志
 logging.basicConfig(

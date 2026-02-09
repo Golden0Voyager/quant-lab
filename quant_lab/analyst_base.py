@@ -1,12 +1,16 @@
+import os
+os.environ['TQDM_DISABLE'] = '1'
+
 import akshare as ak
 import pandas as pd
 from datetime import datetime, timedelta
-import os
 import time
 import json
 from ddgs import DDGS
 import logging
 import requests
+from contextlib import contextmanager
+from functools import wraps
 
 # --- 配置日志系统 ---
 logging.basicConfig(
@@ -15,13 +19,46 @@ logging.basicConfig(
     datefmt='%H:%M:%S'
 )
 
-# === 全局强制直连 (国内环境) ===
-proxy_vars = ['http_proxy', 'https_proxy', 'all_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY']
-for k in proxy_vars:
-    if k in os.environ:
-        del os.environ[k]
+# === 新闻数量配置 ===
+NEWS_CONFIG = {
+    'eastmoney_announcements': 15,  # 东财公告数量（详尽模式：15条）
+    'cls_telegraph_items': 8,       # 财联社电报数量（详尽模式：8条）
+    'duckduckgo_results': 15,       # DuckDuckGo搜索结果（详尽模式：15条）
+}
 
-# --- 辅助函数：东财公告获取 ---
+# === 保留系统代理设置（本地代理如Clash是数据接口的必要通道） ===
+
+# --- 重试装饰器（指数退避） ---
+def retry_on_failure(max_retries=3, delay=1, backoff=2):
+    """
+    失败重试装饰器，使用指数退避策略
+
+    Args:
+        max_retries: 最大重试次数（默认3次）
+        delay: 初始延迟时间（秒，默认1秒）
+        backoff: 退避系数（默认2，即每次重试等待时间翻倍）
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        # 最后一次尝试仍失败，抛出异常
+                        logging.error(f"❌ {func.__name__} 失败（已重试{max_retries}次）: {type(e).__name__}")
+                        raise
+                    # 计算等待时间（指数退避）
+                    wait_time = delay * (backoff ** attempt)
+                    logging.warning(f"⚠️ {func.__name__} 第{attempt+1}次失败，{wait_time:.1f}秒后重试... ({type(e).__name__})")
+                    time.sleep(wait_time)
+            return None
+        return wrapper
+    return decorator
+
+# --- 辅助函数：东财公告获取（带重试） ---
+@retry_on_failure(max_retries=3, delay=1, backoff=2)
 def get_eastmoney_announcements(symbol: str, limit: int = 5) -> list:
     """
     从东方财富获取公司公告
@@ -118,6 +155,145 @@ def clean_code_for_akshare(code, asset_type):
             return f"sz{code}"
     return code
 
+# --- 辅助函数：K线数据获取（带重试 + 雪球优先策略） ---
+@retry_on_failure(max_retries=3, delay=1, backoff=2)
+def fetch_kline_data(asset_type, clean_symbol, start_date, end_date):
+    """
+    获取K线数据（雪球优先方案）
+    """
+    xq_token = os.getenv('XUEQIU_TOKEN') or os.getenv('XQ_TOKEN')
+    
+    # 1. 指数逻辑 (指数目前东财较稳，维持现状)
+    if asset_type == 'index':
+        df = ak.stock_zh_index_daily(symbol=clean_symbol)
+        df.rename(columns={'close': '收盘', 'open': '开盘', 'high': '最高', 'low': '最低', 'volume': '成交量'}, inplace=True)
+        return df
+
+    # 2. 个股与 ETF — 直接使用东财（stock_zh_a_hist_xq 已在 akshare 1.17 移除）
+
+    # 3. 降级回东财 (使用带直连的 context)
+    try:
+        from analyst_data import no_proxy
+    except ImportError:
+        @contextmanager
+        def no_proxy(): yield
+
+    if asset_type == 'etf':
+        return ak.fund_etf_hist_em(symbol=clean_symbol, period="daily", start_date=start_date.strftime("%Y%m%d"), end_date=end_date.strftime("%Y%m%d"), adjust="qfq")
+    else:
+        return ak.stock_zh_a_hist(symbol=clean_symbol, period="daily", start_date=start_date.strftime("%Y%m%d"), end_date=end_date.strftime("%Y%m%d"), adjust="qfq")
+
+# --- 辅助函数：资金流向获取（带重试） ---
+@retry_on_failure(max_retries=3, delay=1, backoff=2)
+def fetch_fund_flow_data(clean_symbol, market):
+    """
+    获取资金流向数据（带重试机制）
+
+    Args:
+        clean_symbol: 清洗后的股票代码
+        market: 市场代码（sh/sz）
+
+    Returns:
+        DataFrame: 资金流向数据
+    """
+    return ak.stock_individual_fund_flow(stock=clean_symbol, market=market)
+
+# === 财联社电报集成逻辑 (内聚版) ===
+
+INDUSTRY_KEYWORDS = {
+    "半导体": ["半导体", "芯片", "集成电路", "IC", "晶圆", "光刻", "EDA", "封测", "存储芯片", "模拟芯片", "功率半导体", "IGBT", "MCU", "FPGA", "GPU", "AI芯片"],
+    "军工": ["军工", "航空", "航天", "国防", "导弹", "雷达", "无人机", "卫星", "航发", "军品", "装备", "舰船", "战机", "火箭"],
+    "新能源": ["新能源", "光伏", "风电", "储能", "锂电池", "充电桩", "电池", "太阳能", "风力发电", "氢能", "核电", "清洁能源"],
+    "电力设备": ["电力", "电网", "变压器", "配电", "输电", "特高压", "智能电网", "电力设备"],
+    "化工": ["化工", "化学", "聚氨酯", "MDI", "TDI", "化学制品", "精细化工", "农药", "化肥"],
+    "新材料": ["碳纤维", "复合材料", "柔性材料", "石墨烯", "新材料", "高分子", "陶瓷", "特种材料", "稀土", "钛合金", "碳材料"],
+    "医药": ["医药", "医疗", "生物", "疫苗", "创新药", "仿制药", "CXO", "医疗器械", "诊断", "试剂", "中药"],
+    "消费": ["消费", "零售", "白酒", "食品", "饮料", "家电", "家居", "服装", "化妆品"],
+    "金融": ["银行", "保险", "证券", "信托", "基金", "金融科技", "支付", "理财"],
+    "房地产": ["房地产", "地产", "物业", "租赁", "保障房", "商业地产"],
+    "互联网": ["互联网", "电商", "游戏", "社交", "短视频", "云计算", "大数据", "软件", "SaaS", "CAD", "工业软件"],
+    "汽车": ["汽车", "新能源车", "智能驾驶", "自动驾驶", "车联网", "零部件", "整车", "电动车"],
+    "机械": ["机械", "工程机械", "机床", "机器人", "自动化", "液压", "工业母机", "数控", "精密制造"],
+}
+
+MACRO_POLICY_KEYWORDS = ["降息", "降准", "加息", "货币政策", "财政政策", "经济工作会议", "政治局会议", "国务院", "发改委", "证监会", "央行", "银保监", "国资委", "减税", "刺激", "扩内需", "稳增长", "房地产调控", "股市政策", "注册制", "退市"]
+
+def get_stock_industry(stock_code: str, stock_name: str) -> list:
+    """根据名称推断所属行业"""
+    name_industry_map = {
+        "紫光国微": ["半导体"], "中望软件": ["互联网"], "华大九天": ["半导体"], "茂莱光学": ["半导体"], "南大光电": ["半导体"],
+        "中信特钢": ["新材料"], "奕瑞科技": ["医药"], "恒立液压": ["机械"], "广东宏大": ["军工"], "中航光电": ["军工"],
+        "中航高科": ["军工"], "航天电器": ["军工"], "斯瑞新材": ["军工", "新材料"], "华秦科技": ["军工"],
+        "西部超导": ["军工", "新材料"], "中国船舶": ["军工"], "思维列控": ["机械"], "帝尔激光": ["新能源"],
+        "光威复材": ["新材料", "军工"], "宁德时代": ["新能源"], "横店东磁": ["新材料", "新能源"], "万华化学": ["化工"],
+        "泰和新材": ["化工", "新材料"], "陕天然气": ["电力设备"], "长江电力": ["电力设备"], "平高电气": ["电力设备"],
+        "立讯精密": ["消费"], "麦格米特": ["机械"], "扬杰科技": ["半导体"], "英维克": ["机械"],
+    }
+    if stock_name in name_industry_map: return name_industry_map[stock_name]
+    industries = []
+    if any(kw in stock_name for kw in ["电", "能源", "电力"]): industries.append("电力设备")
+    if any(kw in stock_name for kw in ["航", "军", "国防"]): industries.append("军工")
+    if any(kw in stock_name for kw in ["芯", "微", "电子", "半导体"]): industries.append("半导体")
+    if any(kw in stock_name for kw in ["材", "复材", "纤维"]): industries.append("新材料")
+    return industries if industries else ["未分类"]
+
+@retry_on_failure(max_retries=2, delay=2)
+def fetch_cls_telegraph(hours: int = 24, max_items: int = 50) -> list:
+    """抓取财联社电报"""
+    try:
+        from bs4 import BeautifulSoup
+        url = "https://www.cls.cn/telegraph"
+        headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'}
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code != 200: return []
+        soup = BeautifulSoup(r.text, 'html.parser')
+        telegraph_list = soup.find_all(['div', 'li'], class_=re.compile(r'telegraph|flash|brief|live-item'))
+        if not telegraph_list: telegraph_list = soup.find_all(['div', 'article'], attrs={'data-time': True})
+        news_items = []
+        for item in telegraph_list[:max_items]:
+            try:
+                time_elem = item.find(['span', 'time'], class_=re.compile(r'time|date'))
+                content_elem = item.find(['p', 'div'], class_=re.compile(r'content|title|text'))
+                content = content_elem.get_text(strip=True) if content_elem else item.get_text(strip=True)
+                if content and len(content) > 10:
+                    news_items.append({"time": time_elem.get_text(strip=True) if time_elem else "", "content": content[:500], "type": "快讯"})
+            except: continue
+        return news_items
+    except: return []
+
+def calculate_cls_relevance(item, stock_code, stock_name, industries):
+    """计算相关性得分"""
+    content = item.get("content", "")
+    if stock_name in content or stock_code in content: return 10, "直接相关"
+    for ind in industries:
+        if ind in INDUSTRY_KEYWORDS:
+            for kw in INDUSTRY_KEYWORDS[ind]:
+                if kw in content: return 6, f"行业相关({kw})"
+    for kw in MACRO_POLICY_KEYWORDS:
+        if kw in content: return 3, f"政策相关({kw})"
+    return 0, "无关"
+
+def match_relevant_telegraphs(stock_code, stock_name, hours=24, min_score=3, max_items=5):
+    """匹配相关电报"""
+    industries = get_stock_industry(stock_code, stock_name)
+    telegraphs = fetch_cls_telegraph(hours=hours)
+    matched = []
+    for item in telegraphs:
+        score, mtype = calculate_cls_relevance(item, stock_code, stock_name, industries)
+        if score >= min_score:
+            matched.append({**item, "relevance_score": score, "match_type": mtype})
+    matched.sort(key=lambda x: x["relevance_score"], reverse=True)
+    return matched[:max_items]
+
+def format_telegraph_for_report(matched_items):
+    """格式化报告文本"""
+    if not matched_items: return ""
+    lines = []
+    for item in matched_items:
+        prefix = "🔥【重要】" if item["relevance_score"] >= 8 else ("⚡【行业】" if item["relevance_score"] >= 5 else "📊【背景】")
+        lines.append(f"{prefix} {item['match_type']} ({item.get('time', '')})\n  {item['content']}")
+    return "\n\n".join(lines)
+
 # --- 3. 核心获取函数 (分层策略) ---
 def fetch_stock_data(symbol, stock_name):
     asset_type = detect_asset_type(symbol)
@@ -130,21 +306,9 @@ def fetch_stock_data(symbol, stock_name):
     try:
         end_date = datetime.now()
         start_date = end_date - timedelta(days=365)
-        df = pd.DataFrame()
 
-        # 🎯 策略分流
-        if asset_type == 'index':
-            # 指数接口
-            df = ak.stock_zh_index_daily(symbol=clean_symbol)
-            df.rename(columns={'close': '收盘'}, inplace=True)
-        
-        elif asset_type == 'etf':
-            # ETF 接口 (东方财富源)
-            df = ak.fund_etf_hist_em(symbol=clean_symbol, period="daily", start_date=start_date.strftime("%Y%m%d"), end_date=end_date.strftime("%Y%m%d"), adjust="qfq")
-        
-        else:
-            # 个股接口
-            df = ak.stock_zh_a_hist(symbol=clean_symbol, period="daily", start_date=start_date.strftime("%Y%m%d"), end_date=end_date.strftime("%Y%m%d"), adjust="qfq")
+        # 🎯 使用带重试的K线数据获取函数
+        df = fetch_kline_data(asset_type, clean_symbol, start_date, end_date)
 
         # 数据清洗与计算
         if not df.empty:
@@ -346,14 +510,15 @@ MACD: {data.get('macd_signal', 'N/A')}
     if asset_type == 'stock':
         try:
             market = "sh" if clean_symbol.startswith(("6", "68")) else "sz"
-            fund_flow = ak.stock_individual_fund_flow(stock=clean_symbol, market=market)
+            # 🎯 使用带重试的资金流向获取函数
+            fund_flow = fetch_fund_flow_data(clean_symbol, market)
             recent = fund_flow.tail(3)
             total_net = recent['主力净流入-净额'].sum()
             # 使用符合直觉的标记：流入用绿色✅（利好），流出用红色❌（利空）
             status = "✅流入" if total_net > 0 else "❌流出"
             amt = f"{total_net/1e8:.2f}亿" if abs(total_net) > 1e8 else f"{total_net/10000:.0f}万"
             data['money_summary'] = f"3日主力{status} {amt}"
-            
+
             txt = ""
             for _, r in recent.iterrows():
                 txt += f"- {str(r['日期'])[:10]}: {'流入' if r['主力净流入-净额']>0 else '流出'}\n"
@@ -369,21 +534,51 @@ MACD: {data.get('macd_signal', 'N/A')}
         data['money_summary'] = "不适用"
         data['money_context'] = "ETF资金流向需查询份额变化，暂不支持直读。"
 
-    # === C. 舆情面 (三引擎策略) ===
+    # === C. 舆情面 (四引擎策略) ===
     news_list = []
     news_source = "无"
+    cls_telegraphs = []  # 财联社电报（可能作为补充）
 
     if asset_type == 'stock':
-        # --- 引擎1: 东方财富公告 (优先) ⚡快速 ---
+        # --- 引擎0: 东方财富公告 (最高优先级) ⚡个股直接公告 ---
         try:
             logging.info(f"尝试东财公告接口: {stock_name}")
-            announcements = get_eastmoney_announcements(symbol, limit=5)
+            announcements = get_eastmoney_announcements(
+                symbol,
+                limit=NEWS_CONFIG['eastmoney_announcements']
+            )
             if announcements:
                 news_list = announcements
                 news_source = "东财公告"
                 logging.info(f"✓ 东财公告获取 {len(news_list)} 条")
         except Exception as e:
             logging.warning(f"✗ 东财公告异常: {type(e).__name__}")
+
+        # --- 引擎1: 财联社电报 (智能匹配) ⚡宏观+行业视角 ---
+        try:
+            logging.info(f"尝试财联社电报智能匹配: {stock_name}")
+            cls_telegraphs = match_relevant_telegraphs(
+                stock_code=symbol,
+                stock_name=stock_name,
+                hours=24,        # 最近24小时
+                min_score=5,     # 最低相关性得分（5分以上才展示）
+                max_items=NEWS_CONFIG['cls_telegraph_items']  # 使用配置的数量
+            )
+
+            if cls_telegraphs:
+                # 判断是否已有东财公告
+                if news_list:
+                    # 有公告，财联社电报作为补充
+                    news_source = "东财公告+财联社电报"
+                    logging.info(f"✓ 财联社电报（补充）: {len(cls_telegraphs)} 条相关")
+                else:
+                    # 无公告，财联社电报作为主要新闻源
+                    cls_formatted = format_telegraph_for_report(cls_telegraphs)
+                    news_list = [cls_formatted]
+                    news_source = "财联社电报"
+                    logging.info(f"✓ 财联社电报（主要）: {len(cls_telegraphs)} 条相关")
+        except Exception as e:
+            logging.warning(f"✗ 财联社电报失败: {type(e).__name__}")
 
         # --- 引擎2: DuckDuckGo 联网搜索 (备用) ---
         if not news_list:
@@ -396,7 +591,7 @@ MACD: {data.get('macd_signal', 'N/A')}
                         query,
                         region='cn-zh',
                         timelimit='w',
-                        max_results=10  # 增加结果数
+                        max_results=NEWS_CONFIG['duckduckgo_results']  # 使用配置的数量
                     ))
 
                     # 放宽过滤条件
@@ -407,7 +602,7 @@ MACD: {data.get('macd_signal', 'N/A')}
                         full_text = title + ' ' + body
                         if stock_name in full_text or symbol in full_text:
                             news_list.append(f"{title}")
-                            if len(news_list) >= 5:  # 限制5条
+                            if len(news_list) >= NEWS_CONFIG['duckduckgo_results']:  # 使用配置的数量
                                 break
 
                     if news_list:
@@ -433,9 +628,27 @@ MACD: {data.get('macd_signal', 'N/A')}
                 logging.warning(f"✗ 大盘数据获取失败: {type(e).__name__}")
 
     # === 数据整合 ===
-    if news_list:
-        data['news_summary'] = f"[{news_source}] {len(news_list)}条"
-        data['news_context'] = "\n".join([f"- {item}" for item in news_list])
+    if news_list or cls_telegraphs:
+        # 合并新闻内容
+        all_news = []
+
+        # 1. 添加东财公告或其他新闻源
+        if news_list:
+            for item in news_list:
+                all_news.append(f"- {item}")
+
+        # 2. 添加财联社电报（如果有且作为补充）
+        if cls_telegraphs and news_source == "东财公告+财联社电报":
+            # format_telegraph_for_report 已在本文件内定义
+            all_news.append("\n【财联社行业/政策快讯】")
+            cls_formatted = format_telegraph_for_report(cls_telegraphs)
+            all_news.append(cls_formatted)
+
+        # 统计新闻条数
+        total_count = len(news_list) + len(cls_telegraphs)
+
+        data['news_summary'] = f"[{news_source}] {total_count}条"
+        data['news_context'] = "\n".join(all_news)
         data['news_source'] = news_source
     else:
         data['news_summary'] = "静默"

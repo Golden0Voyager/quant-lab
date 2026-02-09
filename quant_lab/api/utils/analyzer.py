@@ -13,9 +13,9 @@ from typing import Dict, List, Any, Optional
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 # 导入现有的分析模块
-from analyst_integration_cached import fetch_stock_data
+from analyst_integration import fetch_stock_data
 from analyst_integration import build_enhanced_prompt
-from analyst_brain_v2 import AnalystBrainV2
+from analyst_brain import AnalystBrain
 from valuation_analyzer import ValuationAnalyzer
 from stock_finder import smart_stock_query
 
@@ -32,7 +32,7 @@ class StockAnalyzer:
         if not api_key:
             logger.warning("未配置DASHSCOPE_API_KEY，AI分析功能可能不可用")
 
-        self.brain = AnalystBrainV2(
+        self.brain = AnalystBrain(
             api_key=api_key,
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
             model="qwen-flash"
@@ -71,20 +71,20 @@ class StockAnalyzer:
             name: 股票名称（可选）
 
         Returns:
-            (股票代码, 股票名称)
+            (股票代码, 股票名称, 市场)
         """
         if name:
-            return code, name
+            return code, name, 'A'
 
         # 尝试通过代码查询名称
         try:
-            result = smart_stock_query(code)
-            if result and len(result) > 0:
-                return result[0]['code'], result[0]['name']
+            resolved_code, resolved_name, market = smart_stock_query(code)
+            if resolved_code:
+                return resolved_code, resolved_name, market or 'A'
         except Exception as e:
             logger.warning(f"查询股票名称失败: {e}")
 
-        return code, code
+        return code, code, 'A'
 
     def analyze_fast(self, stock_code: str, stock_name: str = "") -> Dict[str, Any]:
         """
@@ -99,7 +99,7 @@ class StockAnalyzer:
         """
         try:
             # 解析股票代码
-            code, name = self._resolve_stock_code(stock_code, stock_name)
+            code, name, market = self._resolve_stock_code(stock_code, stock_name)
             logger.info(f"开始快速分析: {code} {name}")
 
             # 获取数据
@@ -142,7 +142,7 @@ class StockAnalyzer:
         """
         try:
             # 解析股票代码
-            code, name = self._resolve_stock_code(stock_code, stock_name)
+            code, name, market = self._resolve_stock_code(stock_code, stock_name)
             logger.info(f"开始深度分析: {code} {name}, 策略={prompt_version}")
 
             # 获取数据
@@ -188,7 +188,7 @@ class StockAnalyzer:
         """
         try:
             # 解析股票代码
-            code, name = self._resolve_stock_code(stock_code, stock_name)
+            code, name, market = self._resolve_stock_code(stock_code, stock_name)
             logger.info(f"开始多策略分析: {code} {name}")
 
             # 获取数据
@@ -313,7 +313,7 @@ class StockAnalyzer:
         """
         try:
             # 解析股票代码
-            code, name = self._resolve_stock_code(stock_code, stock_name)
+            code, name, market = self._resolve_stock_code(stock_code, stock_name)
             logger.info(f"开始估值分析: {code} {name}")
 
             # 获取估值数据

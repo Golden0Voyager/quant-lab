@@ -3,7 +3,7 @@
 测试新闻获取功能修复
 """
 import logging
-from analyst_core import fetch_stock_data
+from analyst_base import fetch_stock_data
 
 # 配置日志
 logging.basicConfig(

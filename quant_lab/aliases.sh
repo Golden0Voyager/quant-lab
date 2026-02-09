@@ -1,128 +1,142 @@
 # ============================================
-# Quant Lab V3.0 快捷命令别名配置
-# 添加到 ~/.zshrc 或 ~/.bashrc
-# 更新日期: 2025-12-22
+# Quant Lab V4.0 快捷命令配置（精简版）
+# 添加到 ~/.zshrc: source ~/Code/quant_lab/aliases.sh
+# 更新日期: 2026-02-08
 # ============================================
 
-# 设置动态库路径（用于 WeasyPrint PDF 生成）
-# 必须在 Python 启动前设置，否则 WeasyPrint 无法找到 glib 库
-export DYLD_FALLBACK_LIBRARY_PATH="/opt/homebrew/lib:${DYLD_FALLBACK_LIBRARY_PATH:-}"
-
 # ============================================
-# 基础命令（使用函数包装以确保环境变量生效）
+# 基础命令
 # ============================================
 stock() {
-    DYLD_FALLBACK_LIBRARY_PATH="/opt/homebrew/lib:${DYLD_FALLBACK_LIBRARY_PATH:-}" \
     python /Users/hainingyu/Code/quant_lab/main.py "$@"
 }
 
 # ============================================
-# 单股查询 - 基础模式
+# 单股分析（核心2个命令）
 # ============================================
-# 快速查询（auto模式，智能触发）
-stock-check() { stock --analysis-mode auto --stock "$@"; }
-# 快速分析（fast模式，仅Worker）
-stock-fast() { stock --analysis-mode fast --stock "$@"; }
-# 深度分析（deep模式，默认prompt）
-stock-deep() { stock --analysis-mode deep --stock "$@"; }
+stock-check() { stock --analysis-mode auto --stock "$@"; }   # 智能分析（日常最常用）
+stock-deep() { stock --analysis-mode deep --stock "$@"; }    # 深度分析（买入决策）
 
 # ============================================
-# 单股查询 - Prompt版本 (V3.0 新增)
+# Watchlist 分析（6个命令）
 # ============================================
-# 价值投资分析（deep + value_first）
-stock-value() { stock --analysis-mode deep --prompt-version value_first --stock "$@"; }
-# 量化评分分析（deep + quant_hybrid）
-stock-quant() { stock --analysis-mode deep --prompt-version quant_hybrid --stock "$@"; }
-# 专业研报分析（deep + professional）
-stock-pro() { stock --analysis-mode deep --prompt-version professional --stock "$@"; }
-
-# ============================================
-# Watchlist 分析 - 智能模式 (auto)
-# ============================================
+# 智能模式（日常跟踪）
 stock-my() { stock --list my --analysis-mode auto "$@"; }
 stock-dad() { stock --list dad --analysis-mode auto "$@"; }
 stock-erin() { stock --list erin --analysis-mode auto "$@"; }
 
-# ============================================
-# Watchlist 分析 - 深度模式 (deep)
-# ============================================
+# 深度模式（周末复盘）
 stock-my-deep() { stock --list my --analysis-mode deep "$@"; }
 stock-dad-deep() { stock --list dad --analysis-mode deep "$@"; }
 stock-erin-deep() { stock --list erin --analysis-mode deep "$@"; }
 
 # ============================================
-# Watchlist 分析 - Prompt版本 (V3.0 新增)
+# 估值分析（4个命令）
 # ============================================
-# 价值版深度分析
-stock-my-value() { stock --list my --analysis-mode deep --prompt-version value_first "$@"; }
-stock-dad-value() { stock --list dad --analysis-mode deep --prompt-version value_first "$@"; }
-stock-erin-value() { stock --list erin --analysis-mode deep --prompt-version value_first "$@"; }
-# 量化版深度分析
-stock-my-quant() { stock --list my --analysis-mode deep --prompt-version quant_hybrid "$@"; }
-stock-dad-quant() { stock --list dad --analysis-mode deep --prompt-version quant_hybrid "$@"; }
-stock-erin-quant() { stock --list erin --analysis-mode deep --prompt-version quant_hybrid "$@"; }
-# 专业版深度分析
-stock-my-pro() { stock --list my --analysis-mode deep --prompt-version professional "$@"; }
-stock-dad-pro() { stock --list dad --analysis-mode deep --prompt-version professional "$@"; }
-stock-erin-pro() { stock --list erin --analysis-mode deep --prompt-version professional "$@"; }
+stock-val() { stock --valuation "$@"; }                      # 单股快速估值
+stock-batch-val() { stock --batch-valuation "$@" --delay 3.0; }  # 批量估值
+
+# Watchlist 批量估值
+stock-val-my() {
+    python -c "
+import json
+with open('/Users/hainingyu/Code/quant_lab/watchlists.json') as f:
+    stocks = json.load(f)['my']
+    print('\n'.join([f\"{s['name']} {s['code']}\" for s in stocks]))
+" | stock --batch-valuation /dev/stdin --yes
+}
+
+stock-val-dad() {
+    python -c "
+import json
+with open('/Users/hainingyu/Code/quant_lab/watchlists.json') as f:
+    stocks = json.load(f)['dad']
+    print('\n'.join([f\"{s['name']} {s['code']}\" for s in stocks]))
+" | stock --batch-valuation /dev/stdin --yes
+}
+
+stock-val-erin() {
+    python -c "
+import json
+with open('/Users/hainingyu/Code/quant_lab/watchlists.json') as f:
+    stocks = json.load(f)['erin']
+    print('\n'.join([f\"{s['name']} {s['code']}\" for s in stocks]))
+" | stock --batch-valuation /dev/stdin --yes
+}
 
 # ============================================
 # 工具命令
 # ============================================
-# 查看今日报告
 alias stock-report='ls -lt /Users/hainingyu/Code/quant_lab/Report/$(date +%y%m%d)/ 2>/dev/null || echo "今日暂无报告"'
-# 实时日志
 alias stock-log='tail -f /tmp/quant_lab_log.txt'
-# 查看缓存状态 (V3.0 新增)
 alias stock-cache='sqlite3 /Users/hainingyu/Code/quant_lab/quant_cache.db "SELECT symbol, datetime(cached_at, \"unixepoch\", \"localtime\") as cached_time FROM data_cache ORDER BY cached_at DESC LIMIT 20;"'
-# 清除缓存 (V3.0 新增)
 alias stock-cache-clear='rm -f /Users/hainingyu/Code/quant_lab/quant_cache.db && echo "缓存已清除"'
+
+# 缓存预热（盘后运行，第二天查数据更快）
+stock-warm() { stock --warm-cache "${1:-my}"; }
+alias stock-warm-all='stock --warm-cache all'
 
 # ============================================
 # 帮助命令
 # ============================================
 alias stock-help='echo "
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  📊 Quant Lab V3.0 快捷命令使用指南
+  📊 Quant Lab V4.0 快捷命令使用指南（精简版）
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-【单股查询 - 基础】⭐ 最常用
-  stock-check 广东宏大           智能分析 (auto模式)
-  stock-fast 600519              快速分析 (fast模式)
-  stock-deep 002683:广东宏大     深度分析 (deep模式)
+【单股分析】⭐ 核心2个命令
+  stock-check 广东宏大           智能分析（日常最常用，自动触发深度）
+  stock-deep 600519              深度分析（买入决策，完整研报）
 
-【单股查询 - Prompt版本】🆕 V3.0
-  stock-value 广东宏大           价值投资分析 (估值+盈利质量)
-  stock-quant 广东宏大           量化评分分析 (多因子打分)
-  stock-pro 广东宏大             专业研报分析 (机构风格)
-
-【Watchlist 智能分析】(auto模式)
-  stock-my                       智能分析 My
+【Watchlist 分析】📋 6个命令
+  stock-my                       智能分析 My（日常跟踪）
   stock-dad                      智能分析 Dad
   stock-erin                     智能分析 Erin
 
-【Watchlist 深度分析】(deep模式，默认prompt)
-  stock-my-deep                  深度分析 My
+  stock-my-deep                  深度分析 My（周末复盘）
   stock-dad-deep                 深度分析 Dad
   stock-erin-deep                深度分析 Erin
 
-【Watchlist + Prompt版本】🆕 V3.0 完整覆盖
-  stock-{my,dad,erin}-value      价值投资版
-  stock-{my,dad,erin}-quant      量化评分版
-  stock-{my,dad,erin}-pro        专业研报版
+【估值分析】🎯 4个命令
+  stock-val 600519               单股快速估值（PE/PB/PS/PCF+历史分位）
+  stock-batch-val stocks.txt     批量估值（从文件，带3秒延迟）
+  stock-val-my                   My Watchlist 批量估值
+  stock-val-dad                  Dad Watchlist 批量估值
+  stock-val-erin                 Erin Watchlist 批量估值
 
 【工具命令】
+  stock-warm                     预热缓存 My（盘后运行）
+  stock-warm dad                 预热缓存 Dad
+  stock-warm-all                 预热全部缓存
   stock-report                   查看今日报告列表
   stock-log                      实时查看运行日志
-  stock-cache                    查看缓存状态 🆕
-  stock-cache-clear              清除所有缓存 🆕
+  stock-cache                    查看缓存状态
+  stock-cache-clear              清除所有缓存
   stock-help                     显示此帮助信息
 
-【Prompt版本说明】
-  professional  机构研报风格 (默认)
-  value_first   价值投资视角 (中长期)
-  quant_hybrid  多因子量化评分 (系统化)
+【使用场景】
+  • 日常盘后跟踪：stock-check 广东宏大
+  • 周末深度复盘：stock-my-deep
+  • 快速估值筛选：stock-val 贵州茅台
+  • 批量估值监控：stock-val-my
 
+【高级用法】（需要时直接用参数）
+  # 切换分析模式
+  stock --analysis-mode fast --stock 600519        # 快速模式
+  stock --analysis-mode deep --stock 600519        # 深度模式
+  stock --analysis-mode auto --stock 600519        # 智能模式
+
+  # 切换Prompt风格（深度分析时）
+  stock --analysis-mode deep --prompt-version professional --stock 600519  # 机构研报（默认）
+  stock --analysis-mode deep --prompt-version value_first --stock 600519   # 价值投资
+  stock --analysis-mode deep --prompt-version quant_hybrid --stock 600519  # 量化评分
+
+  # 批量估值（快速模式）
+  stock --batch-valuation stocks.txt --delay 0.5 --yes
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+精简说明：从30+命令精简到13个核心命令，保留最常用场景
+如需特殊分析模式，请使用上方【高级用法】中的完整参数
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 "'
 
@@ -131,6 +145,3 @@ alias stock-help='echo "
 # ============================================
 # 每天15:30 智能分析 My Watchlist（添加到 crontab -e）：
 # 30 15 * * 1-5 /Users/hainingyu/Code/quant_lab/.venv/bin/python /Users/hainingyu/Code/quant_lab/main.py --no-interaction --list my --analysis-mode auto >> /tmp/quant_lab_log.txt 2>&1
-
-# 每周五 深度分析 Erin Watchlist（量化评分版）：
-# 40 15 * * 5 /Users/hainingyu/Code/quant_lab/.venv/bin/python /Users/hainingyu/Code/quant_lab/main.py --no-interaction --list erin --analysis-mode deep --prompt-version quant_hybrid >> /tmp/quant_erin.log 2>&1

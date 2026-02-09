@@ -1,18 +1,25 @@
 """
 带缓存的数据抓取模块
-在 analyst_core_enhanced.py 基础上增加智能缓存功能
+在 analyst_data.py 基础上增加智能缓存功能
 """
 
 import logging
 from datetime import datetime
 from data_cache import DataCache, CacheStrategy
-from analyst_core_enhanced import (
+from analyst_data import (
     fetch_valuation_data,
     fetch_performance_data,
     fetch_sentiment_data,
-    fetch_macro_etf_data
+    fetch_macro_etf_data,
+    fetch_extended_data,
+    fetch_consensus_data,
+    fetch_market_env_data,
+    fetch_lockup_data,
+    fetch_chip_data,
+    fetch_institution_data,
+    fetch_competitor_data,
 )
-from analyst_core import fetch_stock_data
+from analyst_base import fetch_stock_data
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +31,7 @@ def get_cache():
     """获取全局缓存实例（单例模式）"""
     global _cache
     if _cache is None:
-        _cache = DataCache("quant_cache.db")
+        _cache = DataCache()  # 使用默认路径 cache/quant_cache.db
     return _cache
 
 
@@ -171,6 +178,154 @@ def fetch_macro_etf_data_cached(symbol: str, asset_type: str = "stock") -> dict:
     return data
 
 
+def fetch_consensus_data_cached(symbol: str, stock_name: str) -> dict:
+    """
+    获取分析师一致预期数据（带缓存）
+
+    缓存策略：7天
+    """
+    cache = get_cache()
+
+    cached = cache.get(symbol, 'consensus')
+    if cached:
+        logger.info(f"✅ 一致预期缓存命中: {stock_name}")
+        return cached
+
+    logger.info(f"📊 抓取一致预期: {stock_name}")
+    data = fetch_consensus_data(symbol, stock_name)
+
+    cache.set(symbol, 'consensus', data, CacheStrategy.TTL_WEEK)
+
+    return data
+
+
+def fetch_market_env_data_cached(symbol: str, stock_name: str) -> dict:
+    """
+    获取大盘/板块环境数据（带缓存）
+
+    缓存策略：盘中5分钟，盘后24小时（智能TTL）
+    """
+    cache = get_cache()
+
+    cached = cache.get(symbol, 'market_env')
+    if cached:
+        logger.info(f"✅ 大盘环境缓存命中: {stock_name}")
+        return cached
+
+    logger.info(f"🌍 抓取大盘环境: {stock_name}")
+    data = fetch_market_env_data(symbol, stock_name)
+
+    cache.set(symbol, 'market_env', data, CacheStrategy.get_ttl('market_env'))
+
+    return data
+
+
+def fetch_lockup_data_cached(symbol: str, stock_name: str) -> dict:
+    """
+    获取解禁/减持风险数据（带缓存）
+
+    缓存策略：7天
+    """
+    cache = get_cache()
+
+    cached = cache.get(symbol, 'lockup')
+    if cached:
+        logger.info(f"✅ 解禁数据缓存命中: {stock_name}")
+        return cached
+
+    logger.info(f"🔓 抓取解禁数据: {stock_name}")
+    data = fetch_lockup_data(symbol, stock_name)
+
+    cache.set(symbol, 'lockup', data, CacheStrategy.TTL_WEEK)
+
+    return data
+
+
+def fetch_chip_data_cached(symbol: str, stock_name: str) -> dict:
+    """
+    获取筹码分布数据（带缓存）
+
+    缓存策略：盘中5分钟，盘后24小时（智能TTL）
+    """
+    cache = get_cache()
+
+    cached = cache.get(symbol, 'chip')
+    if cached:
+        logger.info(f"✅ 筹码数据缓存命中: {stock_name}")
+        return cached
+
+    logger.info(f"📊 抓取筹码数据: {stock_name}")
+    data = fetch_chip_data(symbol, stock_name)
+
+    cache.set(symbol, 'chip', data, CacheStrategy.get_ttl('chip'))
+
+    return data
+
+
+def fetch_institution_data_cached(symbol: str, stock_name: str) -> dict:
+    """
+    获取机构持仓变化数据（带缓存）
+
+    缓存策略：30天（季度数据）
+    """
+    cache = get_cache()
+
+    cached = cache.get(symbol, 'institution')
+    if cached:
+        logger.info(f"✅ 机构持仓缓存命中: {stock_name}")
+        return cached
+
+    logger.info(f"🏦 抓取机构持仓: {stock_name}")
+    data = fetch_institution_data(symbol, stock_name)
+
+    cache.set(symbol, 'institution', data, CacheStrategy.TTL_MONTH)
+
+    return data
+
+
+def fetch_competitor_data_cached(symbol: str, stock_name: str) -> dict:
+    """
+    获取竞争对手对比数据（带缓存）
+
+    缓存策略：7天
+    """
+    cache = get_cache()
+
+    cached = cache.get(symbol, 'competitor')
+    if cached:
+        logger.info(f"✅ 竞争对手缓存命中: {stock_name}")
+        return cached
+
+    logger.info(f"🔍 抓取竞争对手: {stock_name}")
+    data = fetch_competitor_data(symbol, stock_name)
+
+    cache.set(symbol, 'competitor', data, CacheStrategy.TTL_WEEK)
+
+    return data
+
+
+def fetch_extended_data_cached(symbol: str, stock_name: str) -> dict:
+    """
+    获取扩展数据（带缓存）
+
+    包含：近20日行情、BOLL、季度趋势、行业对比、十大股东
+    缓存策略：24小时（智能TTL）
+    """
+    cache = get_cache()
+
+    cached = cache.get(symbol, 'extended')
+    if cached:
+        logger.info(f"✅ 扩展数据缓存命中: {stock_name}")
+        return cached
+
+    logger.info(f"📊 抓取扩展数据: {stock_name}")
+    data = fetch_extended_data(symbol, stock_name)
+
+    cache.set(symbol, 'extended', data, CacheStrategy.get_ttl('stock_base'))
+
+    return data
+
+
 # ==================== 完整数据抓取（带缓存）====================
 
 def fetch_full_stock_data_cached(symbol: str, stock_name: str, asset_type: str = "stock") -> dict:
@@ -255,6 +410,80 @@ def fetch_full_stock_data_cached(symbol: str, stock_name: str, asset_type: str =
         result.update(macro)
     except Exception as e:
         logger.error(f"宏观数据抓取失败: {e}")
+
+    # 5. 扩展数据（近20日行情、BOLL、季度趋势、行业对比、十大股东）—— 带缓存
+    if asset_type == "stock":
+        try:
+            extended = fetch_extended_data_cached(symbol, stock_name)
+            result.update(extended)
+        except Exception as e:
+            logger.error(f"扩展数据抓取失败: {e}")
+
+    # 6. 新增维度（带缓存）
+    if asset_type == "stock":
+        # 分析师一致预期
+        try:
+            consensus = fetch_consensus_data_cached(symbol, stock_name)
+            result.update(consensus)
+        except Exception as e:
+            logger.error(f"一致预期抓取失败: {e}")
+
+        # 大盘/板块环境
+        try:
+            market_env = fetch_market_env_data_cached(symbol, stock_name)
+            result.update(market_env)
+        except Exception as e:
+            logger.error(f"大盘环境抓取失败: {e}")
+
+        # 解禁/减持风险
+        try:
+            lockup = fetch_lockup_data_cached(symbol, stock_name)
+            result.update(lockup)
+        except Exception as e:
+            logger.error(f"解禁数据抓取失败: {e}")
+
+        # 筹码分布
+        try:
+            chip = fetch_chip_data_cached(symbol, stock_name)
+            result.update(chip)
+        except Exception as e:
+            logger.error(f"筹码数据抓取失败: {e}")
+
+        # 机构持仓变化
+        try:
+            institution = fetch_institution_data_cached(symbol, stock_name)
+            result.update(institution)
+        except Exception as e:
+            logger.error(f"机构持仓抓取失败: {e}")
+
+        # 竞争对手对比
+        try:
+            competitor = fetch_competitor_data_cached(symbol, stock_name)
+            result.update(competitor)
+        except Exception as e:
+            logger.error(f"竞争对手抓取失败: {e}")
+
+    # 7. 交叉计算：PEG = PE-TTM / 预期利润增速
+    try:
+        pe_ttm_raw = result.get('pe_ttm_raw')
+        eps_growth = result.get('eps_growth_rate_raw')
+        if pe_ttm_raw and eps_growth and eps_growth > 0:
+            peg = pe_ttm_raw / eps_growth
+            result['peg'] = f"{peg:.2f}"
+            result['peg_raw'] = peg
+            if peg < 0.5:
+                result['peg_signal'] = f"极度低估(PEG={peg:.2f}<0.5)"
+            elif peg < 1:
+                result['peg_signal'] = f"偏低估(PEG={peg:.2f}<1)"
+            elif peg < 1.5:
+                result['peg_signal'] = f"合理(PEG={peg:.2f})"
+            elif peg < 2:
+                result['peg_signal'] = f"偏高估(PEG={peg:.2f})"
+            else:
+                result['peg_signal'] = f"高估(PEG={peg:.2f}>2)"
+            logger.info(f"✓ PEG计算成功: {result['peg_signal']}")
+    except Exception as e:
+        logger.debug(f"PEG计算失败: {e}")
 
     logger.info(f"✅ 数据抓取完成（已使用缓存优化）\n")
 

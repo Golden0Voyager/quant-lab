@@ -12,5 +12,4 @@ dependencies = [
     "openai>=2.11.0",
     "openpyxl>=3.1.5",
     "pandas>=2.3.3",
-    "weasyprint>=62.3",
 ]

@@ -6,23 +6,64 @@
 import sqlite3
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Optional, Dict, Any
 import os
 
 logger = logging.getLogger(__name__)
 
 
+class QuantJSONEncoder(json.JSONEncoder):
+    """自定义JSON编码器，处理numpy、pandas、日期等类型"""
+    def default(self, obj):
+        # 处理日期对象
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        
+        # 处理 pandas 的 NA 和 Timestamp
+        try:
+            import pandas as pd
+            if pd.isna(obj):
+                return None
+            if isinstance(obj, pd.Timestamp):
+                return obj.isoformat()
+        except ImportError:
+            pass
+
+        # 处理 numpy 数据类型
+        try:
+            import numpy as np
+            if isinstance(obj, np.integer):
+                return int(obj)
+            if isinstance(obj, np.floating):
+                return float(obj)
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, (np.bool_, bool)):
+                return bool(obj)
+        except ImportError:
+            pass
+            
+        return str(obj) # 最后的兜底方案：转为字符串避免报错
+
+
 class DataCache:
     """数据缓存管理器"""
 
-    def __init__(self, db_path: str = "quant_cache.db"):
+    def __init__(self, db_path: str = None):
         """
         初始化缓存管理器
 
         Args:
-            db_path: SQLite数据库路径
+            db_path: SQLite数据库路径（默认: cache/quant_cache.db）
         """
+        if db_path is None:
+            # 默认使用 cache/ 目录下的数据库
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            cache_dir = os.path.join(script_dir, "cache")
+            os.makedirs(cache_dir, exist_ok=True)
+            db_path = os.path.join(cache_dir, "quant_cache.db")
+
         self.db_path = db_path
         self._init_database()
 
@@ -30,6 +71,9 @@ class DataCache:
         """初始化数据库表结构"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
+
+        # 启用 WAL 模式，提升多线程并发读写性能
+        cursor.execute("PRAGMA journal_mode=WAL")
 
         # 创建缓存主表
         cursor.execute("""
@@ -145,7 +189,8 @@ class DataCache:
 
         try:
             expires_at = datetime.now() + timedelta(seconds=ttl_seconds)
-            data_json = json.dumps(data, ensure_ascii=False)
+            # 使用自定义编码器，确保 numpy 数据类型、布尔值和日期能正确序列化
+            data_json = json.dumps(data, ensure_ascii=False, cls=QuantJSONEncoder)
 
             # UPSERT操作（如果存在则更新，不存在则插入）
             cursor.execute("""
@@ -350,6 +395,13 @@ class CacheStrategy:
         'macro': TTL_HOUR,            # 宏观数据（汇率）
         'etf_premium': TTL_REALTIME,  # ETF折溢价
         'tech_daily': TTL_DAY,        # 日K线
+        # 新增数据维度
+        'consensus': TTL_WEEK,        # 分析师一致预期（7天）
+        'market_env': TTL_DAY,        # 大盘/板块环境（盘中5分钟，盘后24小时）
+        'lockup': TTL_WEEK,           # 解禁/减持风险（7天）
+        'chip': TTL_DAY,              # 筹码分布（24小时）
+        'institution': TTL_MONTH,     # 机构持仓变化（30天，季度数据）
+        'competitor': TTL_WEEK,       # 竞争对手对比（7天）
     }
 
     @classmethod
@@ -361,7 +413,7 @@ class CacheStrategy:
         使用智能TTL策略，避免跨交易日使用过期数据
         """
         # 交易日相关数据类型（需要智能TTL）
-        trading_day_types = {'stock_base', 'valuation', 'sentiment_daily', 'tech_daily'}
+        trading_day_types = {'stock_base', 'valuation', 'sentiment_daily', 'tech_daily', 'market_env', 'chip'}
 
         if data_type in trading_day_types:
             return cls._get_smart_ttl_for_trading_data()

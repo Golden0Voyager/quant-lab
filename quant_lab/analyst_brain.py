@@ -13,8 +13,11 @@ import os
 import time
 import logging
 import re
-from openai import OpenAI
 from datetime import datetime, timedelta
+
+# 引入统一配置中心
+import ai_config
+from openai import OpenAI
 
 # 导入新的 Prompt 构建函数
 from analyst_integration import build_enhanced_prompt
@@ -22,24 +25,27 @@ from analyst_integration import build_enhanced_prompt
 logger = logging.getLogger(__name__)
 
 
-class AnalystBrainV2:
+class AnalystBrain:
     """决策层 V2.0 - 量化增强版"""
 
-    def __init__(self, model="deepseek-v3.2", api_key=None, base_url=None, prompt_version="professional"):
+    def __init__(self, model=None, prompt_version="professional"):
         """
         初始化 Brain V2
 
         Args:
-            model: 使用的 LLM 模型
-            api_key: API Key
-            base_url: API Base URL
+            model: 指定模型（可选，默认使用 ai_config 中的主力模型）
             prompt_version: Prompt 版本 (value_first/quant_hybrid/professional)
         """
-        self.model = model
+        # 如果未指定模型，从统一配置获取
+        self.model = model or ai_config.get_primary_model_name()
+        
+        # 获取备用模型（用于重试）
+        self.backup_model = ai_config.get_backup_model_name()
+        
         self.prompt_version = prompt_version
-        self.api_key = api_key or os.getenv("DASHSCOPE_API_KEY")
-        self.base_url = base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        self.client = OpenAI(api_key=self.api_key, base_url=self.base_url, timeout=180.0)  # 增加到3分钟
+        
+        # 使用统一工厂创建客户端
+        self.client = ai_config.create_openai_client(timeout=180.0)
 
     def evaluate_signal_strength_v2(self, data):
         """
@@ -302,11 +308,11 @@ class AnalystBrainV2:
 
     def deep_analyze_stock(self, stock_data, prompt_version=None):
         """
-        调用Brain进行深度分析
+        调用Brain进行深度分析 (支持主备模型切换)
 
         Args:
             stock_data: 从 Worker 层获取的结构化数据
-            prompt_version: Prompt版本 (可选，不指定则使用实例默认版本)
+            prompt_version: Prompt版本
 
         Returns:
             深度分析报告
@@ -317,13 +323,27 @@ class AnalystBrainV2:
         # 使用新的 Prompt 构建函数
         prompt = build_enhanced_prompt(stock_data, analysis_type="brain", prompt_version=version)
 
-        # 调用强推理模型
-        logger.info(f"🧠 Brain V2深度分析: {stock_data['name']} (模型: {self.model}, Prompt: {version})")
+        # 尝试列表：[(模型名称, 尝试次数)]
+        # 策略：先试主模型 2 次，失败后试备用模型 2 次
+        attempts_plan = [
+            (self.model, 1),
+            (self.model, 2),
+            (self.backup_model, 1),
+            (self.backup_model, 2)
+        ]
 
-        for attempt in range(3):
+        logger.info(f"🧠 Brain V2深度分析: {stock_data['name']} (Prompt: {version})")
+
+        last_error = None
+        for model_name, attempt_idx in attempts_plan:
             try:
+                if model_name != self.model and attempt_idx == 1:
+                    logger.info(f"⚠️ 切换到备用模型: {model_name} ...")
+
+                logger.info(f"⏳ 调用 {model_name} (尝试 {attempt_idx})...")
+                
                 completion = self.client.chat.completions.create(
-                    model=self.model,
+                    model=model_name,
                     messages=[
                         {
                             "role": "system",
@@ -334,15 +354,18 @@ class AnalystBrainV2:
                             "content": prompt
                         }
                     ],
-                    temperature=0.3  # 降低温度，提高分析的稳定性
+                    temperature=0.3
                 )
                 return completion.choices[0].message.content
-            except Exception as e:
-                logger.warning(f"Brain V2分析失败 (尝试 {attempt + 1}/3): {type(e).__name__}")
-                if attempt < 2:
-                    time.sleep(2)
 
-        return "深度分析超时，请稍后重试"
+            except Exception as e:
+                last_error = e
+                logger.warning(f"❌ {model_name} 调用失败: {type(e).__name__}")
+                time.sleep(1) # 短暂冷却
+
+        error_msg = f"深度分析失败 (所有模型均尝试失败): {str(last_error)}"
+        logger.error(error_msg)
+        return error_msg
 
     def _build_deep_analysis_prompt(self, data):
         """构建深度分析的 prompt"""
@@ -420,7 +443,7 @@ class AnalystBrainV2:
 
 def test_signal_evaluation():
     """测试信号评估系统"""
-    brain = AnalystBrainV2()
+    brain = AnalystBrain()
 
     # 测试案例1：大额资金流入 + 突破MA20
     test1 = {

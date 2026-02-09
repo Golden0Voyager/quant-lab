@@ -3,7 +3,7 @@
 三引擎方案性能对比测试
 """
 import time
-from analyst_core import fetch_stock_data
+from analyst_base import fetch_stock_data
 import logging
 
 # 配置日志
