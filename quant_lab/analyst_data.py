@@ -12,9 +12,30 @@ import logging
 import numpy as np
 import os  # 用于读取环境变量
 from contextlib import contextmanager
+import sys
+import threading
 
 # 全局禁用 tqdm 进度条（akshare 内部使用），避免干扰终端输出
 os.environ['TQDM_DISABLE'] = '1'
+
+_stderr_lock = threading.Lock()
+
+
+@contextmanager
+def _suppress_c_stderr():
+    """临时屏蔽 C 层 stderr 输出（lxml/libxml2 的 I/O error 等），线程安全"""
+    with _stderr_lock:
+        stderr_fd = sys.stderr.fileno()
+        old_stderr_fd = os.dup(stderr_fd)
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, stderr_fd)
+        os.close(devnull)
+        try:
+            yield
+        finally:
+            os.dup2(old_stderr_fd, stderr_fd)
+            os.close(old_stderr_fd)
+
 
 # 配置日志
 logging.basicConfig(
@@ -33,6 +54,57 @@ def no_proxy():
     本地代理(如 Clash 127.0.0.1:8118)是访问东方财富等接口的必要网络通道。
     """
     yield
+
+
+# ==================== K线数据获取辅助（多源容错） ====================
+
+def _to_sina_symbol(symbol):
+    """将6位纯数字代码转为新浪格式 (sh600000 / sz002594)"""
+    if symbol.startswith(('sh', 'sz')):
+        return symbol
+    if symbol.startswith('6'):
+        return f"sh{symbol}"
+    return f"sz{symbol}"
+
+
+def fetch_kline_multi_source(symbol, start_date, end_date, adjust='qfq'):
+    """
+    多源K线数据获取（东财 → 新浪 → 腾讯），返回统一中文列名的DataFrame。
+    失败返回None。
+    """
+    # 策略1: 东财
+    try:
+        df = ak.stock_zh_a_hist(symbol=symbol, period='daily', start_date=start_date, end_date=end_date, adjust=adjust)
+        if df is not None and not df.empty:
+            return df
+    except Exception:
+        pass
+
+    sina_sym = _to_sina_symbol(symbol)
+
+    # 策略2: 新浪
+    try:
+        df = ak.stock_zh_a_daily(symbol=sina_sym, start_date=start_date, end_date=end_date, adjust=adjust)
+        if df is not None and not df.empty:
+            df = df.rename(columns={'close': '收盘', 'open': '开盘', 'high': '最高', 'low': '最低', 'volume': '成交量', 'date': '日期'})
+            logging.info(f"✓ K线(新浪): {len(df)}条")
+            return df
+    except Exception:
+        pass
+
+    # 策略3: 腾讯
+    try:
+        df = ak.stock_zh_a_hist_tx(symbol=sina_sym, start_date=start_date, end_date=end_date, adjust=adjust)
+        if df is not None and not df.empty:
+            df = df.rename(columns={'close': '收盘', 'open': '开盘', 'high': '最高', 'low': '最低', 'amount': '成交额', 'date': '日期'})
+            if '成交量' not in df.columns:
+                df['成交量'] = 0
+            logging.info(f"✓ K线(腾讯): {len(df)}条")
+            return df
+    except Exception:
+        pass
+
+    return None
 
 
 # ==================== 历史分位计算助手 ====================
@@ -239,13 +311,22 @@ def fetch_valuation_data(symbol: str, stock_name: str) -> dict:
                 
 
 
-                # 获取最新价
+                # 获取最新价（多源容错：东财 → 新浪）
+                hist_df = None
+                try:
+                    hist_df = ak.stock_zh_a_hist(symbol=symbol, period='daily', start_date=(datetime.now() - timedelta(days=7)).strftime('%Y%m%d'), adjust='')
+                except Exception:
+                    pass
+                if hist_df is None or hist_df.empty:
+                    try:
+                        _sina_sym = f"sh{symbol}" if symbol.startswith('6') else f"sz{symbol}"
+                        hist_df = ak.stock_zh_a_daily(symbol=_sina_sym, start_date=(datetime.now() - timedelta(days=7)).strftime('%Y%m%d'), adjust='')
+                        if hist_df is not None and not hist_df.empty:
+                            hist_df = hist_df.rename(columns={'close': '收盘', 'open': '开盘', 'high': '最高', 'low': '最低', 'volume': '成交量'})
+                    except Exception:
+                        pass
 
-
-                hist_df = ak.stock_zh_a_hist(symbol=symbol, period='daily', start_date=(datetime.now() - timedelta(days=7)).strftime('%Y%m%d'), adjust='')
-
-
-                price = _safe_float(hist_df.iloc[-1]['收盘'])
+                price = _safe_float(hist_df.iloc[-1]['收盘']) if hist_df is not None and not hist_df.empty else None
 
 
                 
@@ -677,6 +758,55 @@ def fetch_macro_etf_data(symbol: str, asset_type: str = "stock") -> dict:
     except Exception as e:
         logging.error(f"❌ 宏观维度数据获取失败: {type(e).__name__}")
 
+    # 3. OpenBB 全球及亚太宏观指标
+    try:
+        from analyst_openbb import OpenBBAnalyst
+        openbb_analyst = OpenBBAnalyst(cache_expire_minutes=30)
+        global_macro = openbb_analyst.fetch_global_macro()
+        if global_macro:
+            # 逐项写入 data dict
+            for key in ['us10y_yield', 'dxy_index', 'sp500', 'nasdaq', 'dowjones',
+                         'usdcny', 'hsi_index', 'nikkei225',
+                         'vix_index', 'wti_crude', 'gold', 'silver', 'btc',
+                         'us10y_yield_chg', 'dxy_index_chg', 'sp500_chg', 'nasdaq_chg', 'dowjones_chg',
+                         'usdcny_chg', 'hsi_index_chg', 'nikkei225_chg',
+                         'vix_index_chg', 'wti_crude_chg',
+                         'gold_chg', 'silver_chg', 'btc_chg', 'vix_level']:
+                val = global_macro.get(key)
+                if val is not None:
+                    data[key] = str(val) if val != 'N/A' else 'N/A'
+            data['global_macro_update'] = global_macro.get('update_time', 'N/A')
+
+            # 构建全球宏观摘要（分层展示）
+            def _fmt(label, key, suffix='', chg_key=None):
+                val = global_macro.get(key)
+                if val is None or val == 'N/A':
+                    return None
+                chg = global_macro.get(chg_key) if chg_key else None
+                chg_str = f"({chg:+.2f}%)" if chg and chg != 'N/A' else ''
+                return f"{label}: {val}{suffix}{chg_str}"
+
+            parts = [
+                _fmt("美债10Y", "us10y_yield", "%", "us10y_yield_chg"),
+                _fmt("美元指数", "dxy_index", "", "dxy_index_chg"),
+                _fmt("USD/CNY", "usdcny", "", "usdcny_chg"),
+                _fmt("标普500", "sp500", "", "sp500_chg"),
+                _fmt("纳指", "nasdaq", "", "nasdaq_chg"),
+                _fmt("VIX", "vix_index", f"({global_macro.get('vix_level', '')})", "vix_index_chg"),
+                _fmt("恒指", "hsi_index", "", "hsi_index_chg"),
+                _fmt("日经225", "nikkei225", "", "nikkei225_chg"),
+                _fmt("WTI原油", "wti_crude", "$", "wti_crude_chg"),
+                _fmt("黄金", "gold", "$", "gold_chg"),
+                _fmt("白银", "silver", "$", "silver_chg"),
+                _fmt("BTC", "btc", "$", "btc_chg"),
+            ]
+            data['global_macro_summary'] = ' | '.join(p for p in parts if p) or 'N/A'
+
+            logging.info(f"✓ OpenBB全球宏观: {data['global_macro_summary']}")
+    except Exception as e:
+        logging.warning(f"OpenBB全球宏观获取失败(不影响主流程): {e}")
+        data['global_macro_summary'] = 'N/A'
+
     return data
 
 
@@ -702,13 +832,34 @@ def fetch_recent_20d_and_boll(symbol: str, stock_name: str) -> dict:
         xq_token = os.getenv('XUEQIU_TOKEN') or os.getenv('XQ_TOKEN')
 
         hist_df = None
-        # 策略1: 东财历史数据（stock_zh_a_hist_xq 已在 akshare 1.17 移除）
+        # 策略1: 东财历史数据
         try:
-            with no_proxy():
-                hist_df = ak.stock_zh_a_hist(symbol=symbol, period='daily', start_date=start_date, end_date=end_date, adjust='qfq')
+            hist_df = ak.stock_zh_a_hist(symbol=symbol, period='daily', start_date=start_date, end_date=end_date, adjust='qfq')
             if hist_df is not None and not hist_df.empty:
                 logging.info("✓ K线数据获取成功 (源: 东财)")
         except: pass
+
+        # 策略2: 新浪（stock_zh_a_daily）
+        if hist_df is None or hist_df.empty:
+            try:
+                _sina_sym = f"sh{symbol}" if symbol.startswith('6') else f"sz{symbol}"
+                hist_df = ak.stock_zh_a_daily(symbol=_sina_sym, start_date=start_date, end_date=end_date, adjust='qfq')
+                if hist_df is not None and not hist_df.empty:
+                    hist_df = hist_df.rename(columns={'close': '收盘', 'open': '开盘', 'high': '最高', 'low': '最低', 'volume': '成交量', 'date': '日期'})
+                    logging.info(f"✓ K线数据获取成功 (源: 新浪, {len(hist_df)}条)")
+            except: pass
+
+        # 策略3: 腾讯（stock_zh_a_hist_tx）
+        if hist_df is None or hist_df.empty:
+            try:
+                _sina_sym = f"sh{symbol}" if symbol.startswith('6') else f"sz{symbol}"
+                hist_df = ak.stock_zh_a_hist_tx(symbol=_sina_sym, start_date=start_date, end_date=end_date, adjust='qfq')
+                if hist_df is not None and not hist_df.empty:
+                    hist_df = hist_df.rename(columns={'close': '收盘', 'open': '开盘', 'high': '最高', 'low': '最低', 'amount': '成交额', 'date': '日期'})
+                    if '成交量' not in hist_df.columns:
+                        hist_df['成交量'] = 0
+                    logging.info(f"✓ K线数据获取成功 (源: 腾讯, {len(hist_df)}条)")
+            except: pass
 
         if hist_df is not None and len(hist_df) >= 20:
             # 近20日行情
@@ -948,7 +1099,8 @@ def fetch_consensus_data(symbol: str, stock_name: str) -> dict:
 
         # 2. 获取机构评级历史和目标价
         try:
-            recommend_df = ak.stock_institute_recommend_detail(symbol=symbol)
+            with _suppress_c_stderr():
+                recommend_df = ak.stock_institute_recommend_detail(symbol=symbol)
 
             if recommend_df is not None and not recommend_df.empty:
                 # 取最近的记录
@@ -1037,15 +1189,23 @@ def fetch_consensus_data(symbol: str, stock_name: str) -> dict:
 # 模块级缓存（多只股票共享）
 _index_cache = {'data': None, 'time': None}
 _board_cache = {'data': None, 'time': None}
+_market_breadth_cache = {'data': None, 'time': None}   # 涨跌复盘
+_shibor_cache = {'data': None, 'time': None}            # Shibor利率
+_north_flow_cache = {'data': None, 'time': None}        # 北向资金总量
+_multi_index_cache = {'data': None, 'time': None}       # 多指数数据
 
 def fetch_market_env_data(symbol: str, stock_name: str) -> dict:
     """
-    获取大盘/板块环境数据
+    获取大盘/板块环境数据（扩展版 — 六维市场全景）
 
     数据源：
-    - ak.stock_zh_index_daily(symbol="sh000001") — 上证指数走势
+    - ak.stock_zh_index_daily() — 上证/深证/创业板/科创50/沪深300/中证500
     - ak.stock_board_industry_name_em() — 全行业板块实时排名
     - ak.stock_individual_info_em(symbol) — 个股所属行业
+    - ak.stock_market_activity_legu() — 涨/跌/平家数
+    - ak.stock_zt_pool_em() / stock_zt_pool_dtgc_em() — 涨停/跌停池
+    - ak.stock_hsgt_fund_flow_summary_em() — 北向资金
+    - ak.macro_china_shibor_all() — Shibor利率
 
     Args:
         symbol: 股票代码
@@ -1054,15 +1214,16 @@ def fetch_market_env_data(symbol: str, stock_name: str) -> dict:
     Returns:
         大盘环境数据字典
     """
-    global _index_cache, _board_cache
+    global _index_cache, _board_cache, _market_breadth_cache, _shibor_cache, _north_flow_cache, _multi_index_cache
     data = {}
 
     try:
         logging.info(f"🌍 获取大盘/板块环境: {stock_name}")
         data['market_env_data_date'] = datetime.now().strftime('%Y-%m-%d')
-
-        # 1. 上证指数走势（模块级缓存，5分钟内复用）
         now = datetime.now()
+
+        # ==================== 区块A：多指数覆盖 ====================
+        # 上证指数（已有缓存）+ 新增多指数
         if (_index_cache['data'] is None or _index_cache['time'] is None or
                 (now - _index_cache['time']).total_seconds() > 300):
             try:
@@ -1089,20 +1250,367 @@ def fetch_market_env_data(symbol: str, stock_name: str) -> dict:
                     data['market_index_change_20d'] = f"{change_20d:+.2f}%"
 
                 # MA20判断
-                if len(index_df) >= 20:
-                    ma20 = index_df.tail(20)['close'].astype(float).mean()
-                    data['market_index_above_ma20'] = latest_close > ma20
+                ma20 = index_df.tail(20)['close'].astype(float).mean()
+                data['market_index_above_ma20'] = latest_close > ma20
 
-                    # 市场情绪判断
-                    if latest_close > ma20 and data.get('market_index_change_5d', '').startswith('+'):
-                        data['market_sentiment'] = '偏暖'
-                    elif latest_close < ma20 and data.get('market_index_change_5d', '').startswith('-'):
-                        data['market_sentiment'] = '偏冷'
+                logging.info(f"✓ 上证指数: 5日{data.get('market_index_change_5d', 'N/A')}")
+
+        # 多指数覆盖（深证成指/创业板/科创50/沪深300/中证500）
+        multi_indices = [
+            ('sh000300', '沪深300'), ('sz399006', '创业板指'),
+            ('sh000688', '科创50'), ('sh000905', '中证500'),
+            ('sz399001', '深证成指'),
+        ]
+        if (_multi_index_cache['data'] is None or _multi_index_cache['time'] is None or
+                (now - _multi_index_cache['time']).total_seconds() > 900):  # 15分钟缓存
+            idx_results = {}
+            for idx_symbol, idx_name in multi_indices:
+                try:
+                    idx_df = ak.stock_zh_index_daily(symbol=idx_symbol)
+                    if idx_df is not None and not idx_df.empty and len(idx_df) >= 6:
+                        latest = _safe_float(idx_df.iloc[-1]['close'])
+                        prev5 = _safe_float(idx_df.iloc[-6]['close'])
+                        if latest and prev5:
+                            chg = (latest / prev5 - 1) * 100
+                            idx_results[idx_name] = {'close': latest, 'change_5d': chg, 'df': idx_df}
+                except Exception as e:
+                    logging.debug(f"{idx_name}获取失败: {type(e).__name__}")
+            if idx_results:
+                _multi_index_cache['data'] = idx_results
+                _multi_index_cache['time'] = now
+
+        if _multi_index_cache['data']:
+            parts_idx = []
+            for idx_name in ['沪深300', '创业板指', '科创50', '中证500']:
+                info = _multi_index_cache['data'].get(idx_name)
+                if info:
+                    parts_idx.append(f"{idx_name} {info['change_5d']:+.2f}%")
+            if parts_idx:
+                data['indices_overview'] = ' | '.join(parts_idx)
+                logging.info(f"✓ 多指数: {data['indices_overview']}")
+
+        # ==================== 区块B：大盘成交量 ====================
+        # 三级数据源: 雪球(实时成交额) → 东财_em(历史成交额) → 新浪(仅相对变化)
+        try:
+            amount_available = False
+
+            # --- 策略1: 雪球实时成交额 ---
+            xq_token = os.getenv('XUEQIU_TOKEN') or os.getenv('XQ_TOKEN')
+            if xq_token:
+                try:
+                    sh_spot = ak.stock_individual_spot_xq(symbol='SH000001', token=xq_token)
+                    sz_spot = ak.stock_individual_spot_xq(symbol='SZ399001', token=xq_token)
+                    sh_items = dict(zip(sh_spot['item'], sh_spot['value']))
+                    sz_items = dict(zip(sz_spot['item'], sz_spot['value']))
+                    sh_amt = float(sh_items['成交额'])
+                    sz_amt = float(sz_items['成交额'])
+                    if sh_amt > 0 and sz_amt > 0:
+                        total_amt = sh_amt + sz_amt
+                        total_yi = total_amt / 1e8
+                        if total_yi >= 10000:
+                            data['market_total_volume'] = f"{total_yi/10000:.2f}万亿"
+                        else:
+                            data['market_total_volume'] = f"{total_yi:.0f}亿"
+                        amount_available = True
+                        logging.info(f"✓ 两市成交额(雪球): {data['market_total_volume']}")
+                except Exception as e:
+                    logging.debug(f"雪球成交额获取失败: {type(e).__name__}")
+
+            # --- 策略2: 东财历史成交额 ---
+            if not amount_available:
+                try:
+                    em_start = (now - timedelta(days=30)).strftime('%Y%m%d')
+                    em_end = now.strftime('%Y%m%d')
+                    sh_em = ak.stock_zh_index_daily_em(symbol='sh000001', start_date=em_start, end_date=em_end)
+                    sz_em = ak.stock_zh_index_daily_em(symbol='sz399001', start_date=em_start, end_date=em_end)
+                    if (sh_em is not None and not sh_em.empty and 'amount' in sh_em.columns and
+                            sz_em is not None and not sz_em.empty and 'amount' in sz_em.columns):
+                        sh_amt = _safe_float(sh_em.iloc[-1]['amount'])
+                        sz_amt = _safe_float(sz_em.iloc[-1]['amount'])
+                        if sh_amt and sz_amt:
+                            total_amt = sh_amt + sz_amt
+                            total_yi = total_amt / 1e8
+                            if total_yi >= 10000:
+                                data['market_total_volume'] = f"{total_yi/10000:.2f}万亿"
+                            else:
+                                data['market_total_volume'] = f"{total_yi:.0f}亿"
+                            amount_available = True
+
+                            # 用 amount 计算 vs5日均值
+                            if len(sh_em) >= 6 and len(sz_em) >= 6:
+                                amt_5d = []
+                                for i in range(2, min(7, len(sh_em), len(sz_em))):
+                                    s = _safe_float(sh_em.iloc[-i]['amount'])
+                                    z = _safe_float(sz_em.iloc[-i]['amount'])
+                                    if s and z:
+                                        amt_5d.append(s + z)
+                                if amt_5d:
+                                    avg_5d = sum(amt_5d) / len(amt_5d)
+                                    if avg_5d > 0:
+                                        vol_vs_5d = (total_amt / avg_5d - 1) * 100
+                                        data['market_volume_vs_5d'] = f"{vol_vs_5d:+.1f}%"
+                                        data['market_volume_vs_5d_raw'] = vol_vs_5d
+
+                            logging.info(f"✓ 两市成交额(东财): {data['market_total_volume']}")
+                except Exception as e:
+                    logging.debug(f"东财成交额获取失败(降级到新浪): {type(e).__name__}")
+
+            # --- 新浪 volume 计算相对变化 (无论成交额来源，都可用于vs5日均) ---
+            if 'market_volume_vs_5d' not in data:
+                sh_vol = None
+                sh_vol_5d_list = []
+                sz_vol = None
+                sz_vol_5d_list = []
+
+                if _index_cache['data'] is not None and not _index_cache['data'].empty:
+                    sh_df = _index_cache['data']
+                    if 'volume' in sh_df.columns and len(sh_df) >= 6:
+                        sh_vol = _safe_float(sh_df.iloc[-1]['volume'])
+                        sh_vol_5d_list = [_safe_float(sh_df.iloc[-i]['volume']) for i in range(2, 7)]
+                        sh_vol_5d_list = [v for v in sh_vol_5d_list if v]
+
+                sz_cache = _multi_index_cache['data'].get('深证成指') if _multi_index_cache['data'] else None
+                if sz_cache and 'df' in sz_cache:
+                    sz_df = sz_cache['df']
+                    if 'volume' in sz_df.columns and len(sz_df) >= 6:
+                        sz_vol = _safe_float(sz_df.iloc[-1]['volume'])
+                        sz_vol_5d_list = [_safe_float(sz_df.iloc[-i]['volume']) for i in range(2, 7)]
+                        sz_vol_5d_list = [v for v in sz_vol_5d_list if v]
+
+                if sh_vol:
+                    today_total = sh_vol + (sz_vol or 0)
+                    avg_sh = sum(sh_vol_5d_list) / len(sh_vol_5d_list) if sh_vol_5d_list else 0
+                    avg_sz = sum(sz_vol_5d_list) / len(sz_vol_5d_list) if sz_vol_5d_list else 0
+                    avg_total = avg_sh + avg_sz
+                    if avg_total > 0:
+                        vol_vs_5d = (today_total / avg_total - 1) * 100
+                        data['market_volume_vs_5d'] = f"{vol_vs_5d:+.1f}%"
+                        data['market_volume_vs_5d_raw'] = vol_vs_5d
+                        logging.info(f"✓ 成交量vs5日均(新浪volume): {data['market_volume_vs_5d']}")
+
+            # 量能信号
+            vs_5d = data.get('market_volume_vs_5d_raw')
+            if vs_5d is not None:
+                if vs_5d > 20:
+                    data['market_volume_signal'] = '放量'
+                elif vs_5d < -20:
+                    data['market_volume_signal'] = '缩量'
+                else:
+                    data['market_volume_signal'] = '正常'
+        except Exception as e:
+            logging.debug(f"成交量计算失败: {type(e).__name__}")
+
+        # ==================== 区块C：涨跌复盘 ====================
+        if (_market_breadth_cache['data'] is None or _market_breadth_cache['time'] is None or
+                (now - _market_breadth_cache['time']).total_seconds() > 600):  # 10分钟缓存
+            breadth = {}
+            # 涨跌家数
+            try:
+                activity_df = ak.stock_market_activity_legu()
+                if activity_df is not None and not activity_df.empty:
+                    # legu返回的是key-value格式: item列 + value列
+                    items = dict(zip(activity_df['item'], activity_df['value']))
+                    if '上涨' in items:
+                        breadth['up'] = int(float(items['上涨']))
+                    if '下跌' in items:
+                        breadth['down'] = int(float(items['下跌']))
+                    if '平盘' in items:
+                        breadth['flat'] = int(float(items['平盘']))
+                    if '涨停' in items:
+                        breadth['limit_up_from_legu'] = int(float(items['涨停']))
+                    if '跌停' in items:
+                        breadth['limit_down_from_legu'] = int(float(items['跌停']))
+            except Exception as e:
+                logging.debug(f"涨跌家数获取失败: {type(e).__name__}: {str(e)[:60]}")
+
+            # 涨停池
+            try:
+                today_str = now.strftime('%Y%m%d')
+                zt_df = ak.stock_zt_pool_em(date=today_str)
+                breadth['limit_up'] = len(zt_df) if zt_df is not None else 0
+            except Exception as e:
+                logging.debug(f"涨停池获取失败: {type(e).__name__}")
+
+            # 跌停池
+            try:
+                today_str = now.strftime('%Y%m%d')
+                dt_df = ak.stock_zt_pool_dtgc_em(date=today_str)
+                breadth['limit_down'] = len(dt_df) if dt_df is not None else 0
+            except Exception as e:
+                logging.debug(f"跌停池获取失败: {type(e).__name__}")
+
+            if breadth:
+                _market_breadth_cache['data'] = breadth
+                _market_breadth_cache['time'] = now
+
+        if _market_breadth_cache['data']:
+            b = _market_breadth_cache['data']
+            if 'up' in b:
+                data['market_up_count'] = b['up']
+            if 'down' in b:
+                data['market_down_count'] = b['down']
+            if 'flat' in b:
+                data['market_flat_count'] = b.get('flat', 0)
+            if 'limit_up' in b:
+                data['market_limit_up'] = b['limit_up']
+            elif 'limit_up_from_legu' in b:
+                data['market_limit_up'] = b['limit_up_from_legu']
+            if 'limit_down' in b:
+                data['market_limit_down'] = b['limit_down']
+            elif 'limit_down_from_legu' in b:
+                data['market_limit_down'] = b['limit_down_from_legu']
+
+            up = b.get('up', 0)
+            down = b.get('down', 0)
+            if down > 0:
+                ratio = up / down
+                data['market_advance_decline_ratio'] = f"{ratio:.2f}"
+                data['market_advance_decline_ratio_raw'] = ratio
+                if ratio > 1.5:
+                    data['market_breadth_signal'] = '普涨'
+                elif ratio < 0.67:
+                    data['market_breadth_signal'] = '普跌'
+                else:
+                    data['market_breadth_signal'] = '分化'
+            elif up > 0:
+                data['market_advance_decline_ratio'] = '极端普涨'
+                data['market_advance_decline_ratio_raw'] = 99.0
+                data['market_breadth_signal'] = '普涨'
+
+            logging.info(f"✓ 涨跌: 涨{data.get('market_up_count', '?')}家/跌{data.get('market_down_count', '?')}家 "
+                         f"涨停{data.get('market_limit_up', '?')}/跌停{data.get('market_limit_down', '?')}")
+
+        # ==================== 区块D：跨境资金（南向港股通）====================
+        # 注意: 2024年8月19日起，港交所不再实时披露北向资金净买额，
+        # 所有北向API返回NaN/0。改用南向(港股通)净流入作为跨境资金风向指标。
+        if (_north_flow_cache['data'] is None or _north_flow_cache['time'] is None or
+                (now - _north_flow_cache['time']).total_seconds() > 600):  # 10分钟缓存
+            try:
+                hsgt_df = ak.stock_hsgt_fund_flow_summary_em()
+                if hsgt_df is not None and not hsgt_df.empty:
+                    _north_flow_cache['data'] = hsgt_df
+                    _north_flow_cache['time'] = now
+            except Exception as e:
+                logging.debug(f"沪深港通资金获取失败: {type(e).__name__}: {str(e)[:60]}")
+
+        if _north_flow_cache['data'] is not None and not _north_flow_cache['data'].empty:
+            try:
+                ndf = _north_flow_cache['data']
+                # 南向(港股通)净买额 — 仍然正常披露
+                south_rows = ndf[ndf['资金方向'] == '南向'] if '资金方向' in ndf.columns else pd.DataFrame()
+                if not south_rows.empty and '成交净买额' in south_rows.columns:
+                    south_net = south_rows['成交净买额'].astype(float).sum()
+                    data['south_total_net_flow'] = f"{south_net:+.1f}亿"
+                    data['south_total_net_flow_raw'] = south_net
+                    data['south_flow_direction'] = '净流入港股' if south_net > 0 else '净流出港股'
+                    logging.info(f"✓ 南向资金(港股通): {data['south_total_net_flow']} ({data['south_flow_direction']})")
+
+                # 北向资金标注为已停止披露
+                data['north_total_net_flow'] = '2024年8月起已停止实时披露'
+            except Exception as e:
+                logging.debug(f"沪深港通资金解析失败: {type(e).__name__}")
+
+        # ==================== 区块E：Shibor利率 ====================
+        shibor_ttl = 1800  # 30分钟缓存（日内不变）
+        if (_shibor_cache['data'] is None or _shibor_cache['time'] is None or
+                (now - _shibor_cache['time']).total_seconds() > shibor_ttl):
+            try:
+                shibor_df = ak.macro_china_shibor_all()
+                if shibor_df is not None and not shibor_df.empty:
+                    _shibor_cache['data'] = shibor_df
+                    _shibor_cache['time'] = now
+            except Exception as e:
+                logging.debug(f"Shibor获取失败: {type(e).__name__}: {str(e)[:60]}")
+
+        if _shibor_cache['data'] is not None and not _shibor_cache['data'].empty:
+            try:
+                sdf = _shibor_cache['data']
+                latest = sdf.iloc[-1] if len(sdf) > 0 else None
+                if latest is not None:
+                    # 隔夜 O/N-定价
+                    for col_on in ['O/N-定价', 'O/N_定价', 'O/N', '隔夜']:
+                        if col_on in sdf.columns:
+                            data['shibor_overnight'] = f"{float(latest[col_on]):.3f}%"
+                            data['shibor_overnight_raw'] = float(latest[col_on])
+                            break
+                    # 1W-定价
+                    for col_1w in ['1W-定价', '1W_定价', '1W', '1周']:
+                        if col_1w in sdf.columns:
+                            data['shibor_1w'] = f"{float(latest[col_1w]):.3f}%"
+                            break
+                    # 涨跌幅 (bp)
+                    for col_on_chg in ['O/N-涨跌幅', 'O/N_涨跌幅', 'O/N_涨跌(BP)']:
+                        if col_on_chg in sdf.columns:
+                            chg_bp = float(latest[col_on_chg])
+                            data['shibor_overnight_change'] = f"{chg_bp:+.1f}bp"
+                            data['shibor_overnight_change_raw'] = chg_bp
+                            break
+                    for col_1w_chg in ['1W-涨跌幅', '1W_涨跌幅', '1W_涨跌(BP)']:
+                        if col_1w_chg in sdf.columns:
+                            chg_1w_bp = float(latest[col_1w_chg])
+                            data['shibor_1w_change_raw'] = chg_1w_bp
+                            break
+
+                    # 货币信号判断
+                    on_chg = data.get('shibor_overnight_change_raw', 0)
+                    w1_chg = data.get('shibor_1w_change_raw', 0)
+                    if on_chg > 5 and w1_chg > 5:
+                        data['monetary_signal'] = '收紧'
+                    elif on_chg < -5 and w1_chg < -5:
+                        data['monetary_signal'] = '宽松'
                     else:
-                        data['market_sentiment'] = '中性'
+                        data['monetary_signal'] = '平稳'
 
-                logging.info(f"✓ 上证指数: 5日{data.get('market_index_change_5d', 'N/A')}, 情绪{data.get('market_sentiment', 'N/A')}")
+                    logging.info(f"✓ Shibor: 隔夜{data.get('shibor_overnight', 'N/A')}({data.get('shibor_overnight_change', 'N/A')}) "
+                                 f"货币{data.get('monetary_signal', 'N/A')}")
+            except Exception as e:
+                logging.debug(f"Shibor解析失败: {type(e).__name__}")
 
+        # ==================== 多因子情绪评分（替代原单一MA20判断）====================
+        sentiment_score = 0
+        # 因子1: 上证MA20之上 +1 / 之下 -1
+        if data.get('market_index_above_ma20') is True:
+            sentiment_score += 1
+        elif data.get('market_index_above_ma20') is False:
+            sentiment_score -= 1
+        # 因子2: 5日涨跌 > 0 +1 / < 0 -1
+        chg_5d_str = data.get('market_index_change_5d', '')
+        if chg_5d_str.startswith('+'):
+            sentiment_score += 1
+        elif chg_5d_str.startswith('-'):
+            sentiment_score -= 1
+        # 因子3: 涨跌比 > 1.5 +1 / < 0.67 -1
+        adr = data.get('market_advance_decline_ratio_raw')
+        if adr is not None:
+            if adr > 1.5:
+                sentiment_score += 1
+            elif adr < 0.67:
+                sentiment_score -= 1
+        # 因子4: 南向港股通净流入(资金南下)→偏空 / 净流出(资金回流A股)→偏暖
+        south_raw = data.get('south_total_net_flow_raw')
+        if south_raw is not None:
+            if south_raw < -20:
+                # 大量资金从港股回流，利好A股
+                sentiment_score += 1
+            elif south_raw > 50:
+                # 大量资金南下港股，A股资金分流
+                sentiment_score -= 1
+        # 因子5: 成交量放量 +1 / 缩量 -1
+        vol_signal = data.get('market_volume_signal', '')
+        if vol_signal == '放量':
+            sentiment_score += 1
+        elif vol_signal == '缩量':
+            sentiment_score -= 1
+
+        if sentiment_score >= 2:
+            data['market_sentiment'] = '偏暖'
+        elif sentiment_score <= -2:
+            data['market_sentiment'] = '偏冷'
+        else:
+            data['market_sentiment'] = '中性'
+        data['market_sentiment_score'] = sentiment_score
+
+        # ==================== 原有逻辑：个股所属行业 ====================
         # 2. 获取个股所属行业
         sector_name = None
         try:
@@ -1116,18 +1624,41 @@ def fetch_market_env_data(symbol: str, stock_name: str) -> dict:
             logging.warning(f"行业信息获取失败: {type(e).__name__}")
 
         # 3. 行业板块排名（模块级缓存，5分钟内复用）
+        #    数据源: 东财EM(主) → 同花顺THS(备)
+        #    统一绕过代理: 国内API直连更稳定，避免前序API调用耗尽代理连接池
         if (_board_cache['data'] is None or _board_cache['time'] is None or
                 (now - _board_cache['time']).total_seconds() > 300):
+            saved_proxies = {}
+            for pkey in ('http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY'):
+                if pkey in os.environ:
+                    saved_proxies[pkey] = os.environ.pop(pkey)
             try:
-                import requests
-                old_timeout = requests.adapters.DEFAULT_RETRIES
-                # push2.eastmoney.com 经常超时，限制重试
-                board_df = ak.stock_board_industry_name_em()
-                if board_df is not None and not board_df.empty:
-                    _board_cache['data'] = board_df
-                    _board_cache['time'] = now
-            except Exception as e:
-                logging.debug(f"行业板块排名获取失败: {type(e).__name__}: {str(e)[:60]}")
+                # 策略1: 东财
+                try:
+                    board_df = ak.stock_board_industry_name_em()
+                    if board_df is not None and not board_df.empty:
+                        _board_cache['data'] = board_df
+                        _board_cache['time'] = now
+                        logging.info(f"✓ 行业板块(东财): {len(board_df)}个行业")
+                except Exception as e:
+                    logging.debug(f"行业板块(东财)失败: {type(e).__name__}: {str(e)[:60]}")
+                # 策略2: 同花顺 (列名不同，需统一)
+                if _board_cache['data'] is None:
+                    try:
+                        board_df = ak.stock_board_industry_summary_ths()
+                        if board_df is not None and not board_df.empty:
+                            board_df = board_df.rename(columns={
+                                '板块': '板块名称',
+                                '净流入': '主力净流入',
+                                '总成交额': '成交额',
+                            })
+                            _board_cache['data'] = board_df
+                            _board_cache['time'] = now
+                            logging.info(f"✓ 行业板块(同花顺): {len(board_df)}个行业")
+                    except Exception as e:
+                        logging.debug(f"行业板块(同花顺)也失败: {type(e).__name__}: {str(e)[:60]}")
+            finally:
+                os.environ.update(saved_proxies)
 
         if _board_cache['data'] is not None and not _board_cache['data'].empty and sector_name:
             board_df = _board_cache['data']
@@ -1137,8 +1668,19 @@ def fetch_market_env_data(symbol: str, stock_name: str) -> dict:
             # 尝试精确匹配
             sector_row = board_df[board_df['板块名称'] == sector_name]
             if sector_row.empty:
-                # 尝试模糊匹配
+                # 模糊匹配: 前2字
                 sector_row = board_df[board_df['板块名称'].str.contains(sector_name[:2], na=False)]
+            if sector_row.empty:
+                # 关键字匹配: 去除通用词后，找共享关键字 (如"酿酒行业"→"酒"→"白酒")
+                generic_words = set('行业制造设备服务概念板块及与')
+                keywords = set(sector_name) - generic_words
+                if keywords:
+                    for idx, r in board_df.iterrows():
+                        bname = str(r['板块名称'])
+                        bkeys = set(bname) - generic_words
+                        if keywords & bkeys:  # 有交集
+                            sector_row = board_df.loc[[idx]]
+                            break
 
             if not sector_row.empty:
                 row = sector_row.iloc[0]
@@ -1158,16 +1700,61 @@ def fetch_market_env_data(symbol: str, stock_name: str) -> dict:
 
                 logging.info(f"✓ 板块: {sector_name} 排名{data.get('sector_rank', 'N/A')}")
 
-        # 生成摘要
+        # ==================== 区块F：大盘异动（热门/冷门板块）====================
+        if _board_cache['data'] is not None and not _board_cache['data'].empty:
+            try:
+                board_df = _board_cache['data']
+                if '涨跌幅' in board_df.columns:
+                    board_sorted = board_df.sort_values('涨跌幅', ascending=False)
+                    # 涨幅前3
+                    hot3 = []
+                    for _, r in board_sorted.head(3).iterrows():
+                        chg = _safe_float(r['涨跌幅'])
+                        if chg is not None:
+                            hot3.append(f"{r['板块名称']} {chg:+.2f}%")
+                    data['hot_sectors_top3'] = hot3
+
+                    # 跌幅前3
+                    cold3 = []
+                    for _, r in board_sorted.tail(3).iterrows():
+                        chg = _safe_float(r['涨跌幅'])
+                        if chg is not None:
+                            cold3.append(f"{r['板块名称']} {chg:+.2f}%")
+                    data['cold_sectors_top3'] = cold3
+
+                    if hot3 or cold3:
+                        logging.info(f"✓ 热门板块: {hot3[:2]} | 冷门: {cold3[:2]}")
+            except Exception as e:
+                logging.debug(f"板块异动计算失败: {type(e).__name__}")
+
+        # ==================== 生成摘要 ====================
         parts = []
         if data.get('market_sentiment'):
-            parts.append(f"大盘{data['market_sentiment']}")
+            parts.append(f"大盘{data['market_sentiment']}(评分{data.get('market_sentiment_score', 'N/A')})")
         if data.get('market_index_change_5d'):
-            parts.append(f"5日{data['market_index_change_5d']}")
+            parts.append(f"上证5日{data['market_index_change_5d']}")
+        if data.get('indices_overview'):
+            parts.append(data['indices_overview'])
+        if data.get('market_total_volume'):
+            vol_part = f"成交{data['market_total_volume']}"
+            if data.get('market_volume_vs_5d'):
+                vol_part += f"(vs5日均{data['market_volume_vs_5d']}"
+                if data.get('market_volume_signal'):
+                    vol_part += f",{data['market_volume_signal']}"
+                vol_part += ")"
+            parts.append(vol_part)
+        elif data.get('market_volume_vs_5d'):
+            vol_part = f"量能vs5日均{data['market_volume_vs_5d']}"
+            if data.get('market_volume_signal'):
+                vol_part += f"({data['market_volume_signal']})"
+            parts.append(vol_part)
+        if data.get('market_up_count') is not None and data.get('market_down_count') is not None:
+            parts.append(f"涨{data['market_up_count']}/跌{data['market_down_count']} "
+                         f"涨停{data.get('market_limit_up', '?')}/跌停{data.get('market_limit_down', '?')}")
+        if data.get('south_total_net_flow'):
+            parts.append(f"南向(港股通){data['south_total_net_flow']}")
         if data.get('sector_name'):
-            parts.append(f"板块[{data['sector_name']}]")
-        if data.get('sector_rank'):
-            parts.append(f"排名{data['sector_rank']}")
+            parts.append(f"板块[{data['sector_name']}]排名{data.get('sector_rank', 'N/A')}")
 
         data['market_env_summary'] = ' | '.join(parts) if parts else '大盘环境数据不可用'
 

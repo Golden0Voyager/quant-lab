@@ -17,10 +17,11 @@ import ai_config
 ai_config.init_global_network()
 
 # === 使用带缓存的四维数据抓取（性能提升100倍+） ===
-from analyst_integration import fetch_stock_data
+from analyst_integration import fetch_stock_data, build_enhanced_prompt
 from analyst_brain import AnalystBrain
 from stock_finder import smart_stock_query, StockFinder
 from valuation_analyzer import ValuationAnalyzer
+from md2pdf_tool import md_to_pdf
 
 # 配置日志
 logging.basicConfig(
@@ -145,10 +146,12 @@ def ask_user_with_timeout(prompt_text, timeout=5, default='n'):
             response = sys.stdin.readline().strip().lower()
             return response if response else default
         else:
-            print(f"⏱️  {timeout}秒内未响应，自动跳过")
+            action = "自动开始" if default == 'y' else "自动跳过"
+            print(f"⏱️  {timeout}秒内未响应，{action}")
             return default
     else:
         try:
+            # Windows 下暂不支持 select.select 控制标准输入，这里简化处理
             response = input().strip().lower()
             return response if response else default
         except: return default
@@ -177,6 +180,77 @@ def call_ai(prompt, model=None):
             time.sleep(1)
 
     return f"⚠️ AI 分析服务暂时不可用\n\n错误详情: {str(last_error)}"
+
+
+def run_global_stock_mode(ticker):
+    """全球股票分析模式 —— 通过 OpenBB 获取数据，AI 生成分析报告"""
+    from analyst_openbb import OpenBBAnalyst
+
+    ticker = ticker.upper()
+    print(f"\n{'='*60}\n🌍 全球股票分析模式\n📅 日期: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n🎯 标的: {ticker}\n{'='*60}\n")
+
+    analyst = OpenBBAnalyst(cache_expire_minutes=30)
+
+    # 1. 获取全球宏观背景
+    print("📊 获取全球宏观数据...")
+    macro = analyst.fetch_global_macro()
+
+    # 2. 获取个股数据
+    print(f"📈 获取 {ticker} 行情与技术指标...")
+    stock_data = analyst.fetch_stock_analysis(ticker)
+
+    stock_name = stock_data.get('name', ticker)
+    print(f"✓ 标的: {stock_name}")
+    print(f"✓ 技术面: {stock_data.get('tech_summary', 'N/A')}")
+    print(f"✓ 基本面: {stock_data.get('fundamental_summary', 'N/A')}")
+
+    # 3. 构建 prompt
+    prompt = analyst.build_global_prompt({**stock_data, 'macro': macro or {}})
+
+    # 4. 调用 AI 分析
+    print(f"\n🤖 正在调用 AI 分析...\n")
+    try:
+        summary = call_ai(prompt)
+        analysis_label = "🌍 Global 全球分析"
+
+        print(f"\n{'='*60}\n{analysis_label}:\n{'='*60}\n")
+        print(f"**技术面**: {stock_data.get('tech_summary', 'N/A')}")
+        print(f"**基本面**: {stock_data.get('fundamental_summary', 'N/A')}")
+        if macro:
+            macro_parts = []
+            if macro.get('us10y_yield') != 'N/A':
+                macro_parts.append(f"美债10Y: {macro['us10y_yield']}%")
+            if macro.get('dxy_index') != 'N/A':
+                macro_parts.append(f"DXY: {macro['dxy_index']}")
+            if macro.get('hsi_index') != 'N/A':
+                macro_parts.append(f"恒指: {macro['hsi_index']}")
+            print(f"**宏观面**: {' | '.join(macro_parts)}")
+        print(f"\n{summary}\n{'='*60}\n")
+
+        # 5. 保存报告
+        now = datetime.now()
+        report_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Report", now.strftime('%y%m%d'))
+        os.makedirs(report_dir, exist_ok=True)
+        filename = os.path.join(report_dir, f"{now.strftime('%H%M%S')}_{ticker}_global.md")
+
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(f"# {stock_name}（{ticker}）全球市场分析\n\n")
+            f.write(f"> 生成时间: {now.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            f.write(f"> 分析模式: {analysis_label}\n\n")
+            f.write(f"## 数据概览\n\n")
+            f.write(f"- **技术面**: {stock_data.get('tech_summary', 'N/A')}\n")
+            f.write(f"- **基本面**: {stock_data.get('fundamental_summary', 'N/A')}\n")
+            if macro:
+                f.write(f"- **宏观面**: 美债10Y {macro.get('us10y_yield', 'N/A')}% | DXY {macro.get('dxy_index', 'N/A')} | 恒指 {macro.get('hsi_index', 'N/A')}\n")
+            f.write(f"\n## AI分析\n\n{summary}\n")
+
+        print(f"✅ Markdown报告已保存: {filename}")
+        pdf_path = filename.replace('.md', '.pdf')
+        if md_to_pdf(filename, pdf_path):
+            print(f"✅ PDF报告已生成: {pdf_path}")
+    except Exception as e:
+        logging.error(f"❌ AI分析失败: {e}")
+
 
 def run_single_stock_mode(stock_code, stock_name=None, analysis_mode="auto", prompt_version="professional"):
     market = 'A'
@@ -208,13 +282,14 @@ def run_single_stock_mode(stock_code, stock_name=None, analysis_mode="auto", pro
     elif data['type'] == 'etf':
         prompt = f"你是一位ETF交易员。请点评行业ETF【{stock_name}】：\n- 赛道趋势: {data['tech_summary']}\n要求判断强弱并给出一句话建议。"
     else:
-        prompt = f"你是一位专业的股票分析师。请对个股【{stock_name}】进行客观分析：\n- 资金面: {data['money_summary']}\n- 技术面: {data['tech_summary']}\n- 舆情: {data['news_context']}\n要求指出机会与风险并给出评级。"
+        prompt = build_enhanced_prompt(data, analysis_type="worker")
 
     use_deep_analysis, trigger_reasons, signal_score = (True, ["用户指定深度分析"], 0) if analysis_mode == 'deep' else (brain.evaluate_signal_strength_v2(data) if (analysis_mode == 'auto' and brain) else (False, [], 0))
 
     try:
         if use_deep_analysis and brain:
-            print(f"🧠 触发深度分析 (评分{signal_score}分): {', '.join(trigger_reasons)}\n")
+            print(f"🧠 触发深度分析 (评分{signal_score}分): {', '.join(trigger_reasons)}")
+            print(f"⏳ AI深度分析中，请稍候...\n")
             summary = brain.deep_analyze_stock(data)
             analysis_label = "🧠 Brain 深度分析"
         else:
@@ -233,6 +308,9 @@ def run_single_stock_mode(stock_code, stock_name=None, analysis_mode="auto", pro
             f.write(f"# {stock_name}（{stock_code}）投资分析\n\n> 生成时间: {now.strftime('%Y-%m-%d %H:%M:%S')}\n\n> 分析模式: {analysis_label}\n\n## 数据概览\n\n- **资金面**: {data['money_summary']}\n- **技术面**: {data['tech_summary']}\n- **舆情**: {data['news_summary']}\n\n## AI分析\n\n{summary}\n")
 
         print(f"✅ Markdown报告已保存: {filename}")
+        pdf_path = filename.replace('.md', '.pdf')
+        if md_to_pdf(filename, pdf_path):
+            print(f"✅ PDF报告已生成: {pdf_path}")
     except Exception as e:
         logging.error(f"❌ AI分析失败: {e}")
 
@@ -246,15 +324,29 @@ def run_monitor_mode(watchlist_name="my", analysis_mode="fast", prompt_version="
     report_content = f"# 每日投资报告（{now.strftime('%Y-%m-%d')}）\n\n> 本报告由AI自动生成，仅供参考。\n\n"
     
     stock_data_map = {}
+    total = len(watchlist)
+    print(f"📊 数据获取中 (共{total}只)...")
+    fetch_start = time.time()
+    fetch_lock = threading.Lock()
+    fetch_done = [0]
+
     with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {executor.submit(fetch_stock_data, s['code'], s['name']): s for s in watchlist}
         for future in as_completed(futures):
             stock = futures[future]
             try:
                 stock_data_map[stock['code']] = (stock, future.result())
-                logging.info(f"✅ {stock['name']}: 数据已获取")
+                with fetch_lock:
+                    fetch_done[0] += 1
+                    elapsed = time.time() - fetch_start
+                    print(f"  [{fetch_done[0]}/{total}] ✓ {stock['name']}({stock['code']}) 就绪 ({elapsed:.1f}s)")
             except Exception as e:
-                logging.error(f"❌ {stock['name']}: {e}")
+                with fetch_lock:
+                    fetch_done[0] += 1
+                    print(f"  [{fetch_done[0]}/{total}] ✗ {stock['name']}({stock['code']}) 失败: {e}")
+
+    fetch_elapsed = time.time() - fetch_start
+    print(f"📊 数据获取完成 ({len(stock_data_map)}/{total}), 耗时 {fetch_elapsed:.1f}s\n")
 
     # 准备所有分析任务
     analysis_tasks = []
@@ -266,14 +358,25 @@ def run_monitor_mode(watchlist_name="my", analysis_mode="fast", prompt_version="
     deep_count = 0
     ai_results = {}
     ai_semaphore = threading.Semaphore(3)  # 最多 3 个并发 AI 调用
+    ai_total = len(analysis_tasks)
+    ai_lock = threading.Lock()
+    ai_done = [0]
+    ai_start = time.time()
+
+    print(f"🧠 AI深度分析中 (共{ai_total}只)...")
 
     def analyze_one(code, stock, data, use_deep):
         ai_semaphore.acquire()
         try:
+            t0 = time.time()
             if use_deep and brain:
-                return brain.deep_analyze_stock(data), "🧠 深度分析"
+                result = brain.deep_analyze_stock(data), "🧠 深度分析"
             else:
-                return call_ai(f"请对{stock['name']}进行快速分析。数据：{data['tech_summary']}, {data['money_summary']}"), "🤖 快速分析"
+                result = call_ai(f"请对{stock['name']}进行快速分析。数据：{data['tech_summary']}, {data['money_summary']}"), "🤖 快速分析"
+            with ai_lock:
+                ai_done[0] += 1
+                print(f"  [✓ 完成 {ai_done[0]}/{ai_total}] {stock['name']} ({time.time()-t0:.1f}s)")
+            return result
         finally:
             ai_semaphore.release()
 
@@ -286,17 +389,19 @@ def run_monitor_mode(watchlist_name="my", analysis_mode="fast", prompt_version="
                 time.sleep(2)  # 限流：每次提交间隔 2 秒，避免触发 API QPM 限制
             future = ai_executor.submit(analyze_one, code, stock, data, use_deep)
             future_map[future] = (code, stock, data)
-            logging.info(f"📤 已提交分析任务 [{idx+1}/{len(analysis_tasks)}]: {stock['name']}")
+            print(f"  [→ 提交 {idx+1}/{ai_total}] {stock['name']}")
 
         for future in as_completed(future_map):
             code, stock, data = future_map[future]
             try:
                 summary, label = future.result()
                 ai_results[code] = (stock, data, summary, label)
-                logging.info(f"✅ AI分析完成: {stock['name']}")
             except Exception as e:
                 logging.error(f"❌ AI分析失败: {stock['name']}: {e}")
                 ai_results[code] = (stock, data, f"⚠️ 分析失败: {e}", "❌ 失败")
+
+    ai_elapsed = time.time() - ai_start
+    print(f"🧠 AI分析完成 ({len(ai_results)}/{ai_total}), 耗时 {ai_elapsed:.1f}s\n")
 
     # 按原始顺序组装报告
     for code, stock, data, use_deep, triggers, score in analysis_tasks:
@@ -311,6 +416,9 @@ def run_monitor_mode(watchlist_name="my", analysis_mode="fast", prompt_version="
 
     with open(filename, "w", encoding="utf-8") as f: f.write(report_content)
     print(f"\n✅ Markdown报告已生成: {filename}")
+    pdf_path = filename.replace('.md', '.pdf')
+    if md_to_pdf(filename, pdf_path):
+        print(f"✅ PDF报告已生成: {pdf_path}")
 
 # ============================================================
 # 批量估值分析
@@ -432,6 +540,9 @@ class BatchValuationAnalyzer:
                     f.write(analysis)
 
                 print(f"✅ 报告已保存: {filename}")
+                pdf_path = filename.replace('.md', '.pdf')
+                if md_to_pdf(filename, pdf_path):
+                    print(f"✅ PDF报告已生成: {pdf_path}")
                 stats['success'] += 1
 
                 if idx < len(stocks):
@@ -539,6 +650,7 @@ if __name__ == "__main__":
     parser.add_argument('--valuation', help='快速估值模式')
     parser.add_argument('--batch-valuation', help='批量估值模式')
     parser.add_argument('--warm-cache', choices=['my', 'dad', 'erin', 'all'], help='缓存预热')
+    parser.add_argument('--global', dest='global_stock', help='全球股票分析模式 (如 TSLA, AAPL, MSFT)')
     parser.add_argument('--delay', type=float, default=2.0)
     parser.add_argument('--yes', '-y', action='store_true')
 
@@ -566,7 +678,9 @@ if __name__ == "__main__":
             filename = os.path.join(report_dir, f"{now.strftime('%H%M%S')}_{name}_估值分析.md")
             ai_section = ""
 
-            if ask_user_with_timeout("\n🤔 是否调用AI分析？[y/N]: ", 5) in ['y', 'yes']:
+            # 修改为9秒超时，默认自动开始 (y)
+            prompt_msg = "\n🤔 是否启动AI深度分析？(9秒内未响应将自动开始) [Y/n]: "
+            if ask_user_with_timeout(prompt_msg, 9, default='y') in ['y', 'yes']:
                 ai_result = call_ai(va.generate_llm_prompt(metrics))
                 print(ai_result)
                 ai_section = f"\n## AI深度分析\n\n{ai_result}\n"
@@ -574,6 +688,13 @@ if __name__ == "__main__":
             with open(filename, "w", encoding="utf-8") as f:
                 f.write(f"# {name}（{code}）估值分析\n\n> 生成时间: {now.strftime('%Y-%m-%d %H:%M:%S')}\n\n{summary}\n{ai_section}")
             print(f"\n✅ 报告已保存: {filename}")
+            pdf_path = filename.replace('.md', '.pdf')
+            if md_to_pdf(filename, pdf_path):
+                print(f"✅ PDF报告已生成: {pdf_path}")
+        sys.exit(0)
+
+    if args.global_stock:
+        run_global_stock_mode(args.global_stock)
         sys.exit(0)
 
     if args.stock:

@@ -3,6 +3,7 @@
 在 analyst_data.py 基础上增加智能缓存功能
 """
 
+import time
 import logging
 from datetime import datetime
 from data_cache import DataCache, CacheStrategy
@@ -346,6 +347,8 @@ def fetch_full_stock_data_cached(symbol: str, stock_name: str, asset_type: str =
     logger.info(f"🔄 开始抓取（智能缓存模式）: {stock_name} ({symbol})")
     logger.info(f"{'='*60}\n")
 
+    _fetch_start = time.time()
+
     result = {
         'code': symbol,
         'name': stock_name,
@@ -485,7 +488,8 @@ def fetch_full_stock_data_cached(symbol: str, stock_name: str, asset_type: str =
     except Exception as e:
         logger.debug(f"PEG计算失败: {e}")
 
-    logger.info(f"✅ 数据抓取完成（已使用缓存优化）\n")
+    _fetch_elapsed = time.time() - _fetch_start
+    logger.info(f"✓ {stock_name}({symbol}) 数据就绪 ({_fetch_elapsed:.1f}s)\n")
 
     return result
 
