@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 94" width="400" height="94">
+
+  <!--
+    量知 AIpha — Banner / Header Edition (White)
+    4×6 grid (reduced from 5×7), golden ratio preserved:
+    • sq=16, gap=5 → step=21
+    • Text: font cascade 28/17/9/8 (scaled from 42/26/12/11)
+    • Trend path: 3→2→1→2→1→0
+  -->
+
+  <defs>
+    <filter id="lineglow" x="-40%" y="-60%" width="180%" height="220%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="3.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Circuit grid lines (through block centers) -->
+  <g stroke="#d6dce6" stroke-width="0.4" opacity="0.35">
+    <!-- Vertical (6 cols) -->
+    <line x1="14" y1="6" x2="14" y2="88"/>
+    <line x1="35" y1="6" x2="35" y2="88"/>
+    <line x1="56" y1="6" x2="56" y2="88"/>
+    <line x1="77" y1="6" x2="77" y2="88"/>
+    <line x1="98" y1="6" x2="98" y2="88"/>
+    <line x1="119" y1="6" x2="119" y2="88"/>
+    <!-- Horizontal (4 rows) -->
+    <line x1="0" y1="16" x2="133" y2="16"/>
+    <line x1="0" y1="37" x2="133" y2="37"/>
+    <line x1="0" y1="58" x2="133" y2="58"/>
+    <line x1="0" y1="79" x2="133" y2="79"/>
+  </g>
+
+  <!-- Klein blue blocks (sq=16, gap=5) -->
+  <g fill="#002FA7" fill-opacity="0.85" stroke="#002FA7" stroke-opacity="0.12" stroke-width="0.4">
+    <!-- Col 0: rows 0,1,2 -->
+    <rect x="6" y="8" width="16" height="16" rx="1.5"/>
+    <rect x="6" y="29" width="16" height="16" rx="1.5"/>
+    <rect x="6" y="50" width="16" height="16" rx="1.5"/>
+    <!-- Col 1: rows 0,1,3 -->
+    <rect x="27" y="8" width="16" height="16" rx="1.5"/>
+    <rect x="27" y="29" width="16" height="16" rx="1.5"/>
+    <rect x="27" y="71" width="16" height="16" rx="1.5"/>
+    <!-- Col 2: rows 0,2,3 -->
+    <rect x="48" y="8" width="16" height="16" rx="1.5"/>
+    <rect x="48" y="50" width="16" height="16" rx="1.5"/>
+    <rect x="48" y="71" width="16" height="16" rx="1.5"/>
+    <!-- Col 3: rows 0,1,3 -->
+    <rect x="69" y="8" width="16" height="16" rx="1.5"/>
+    <rect x="69" y="29" width="16" height="16" rx="1.5"/>
+    <rect x="69" y="71" width="16" height="16" rx="1.5"/>
+    <!-- Col 4: rows 0,2,3 -->
+    <rect x="90" y="8" width="16" height="16" rx="1.5"/>
+    <rect x="90" y="50" width="16" height="16" rx="1.5"/>
+    <rect x="90" y="71" width="16" height="16" rx="1.5"/>
+    <!-- Col 5: rows 1,2,3 -->
+    <rect x="111" y="29" width="16" height="16" rx="1.5"/>
+    <rect x="111" y="50" width="16" height="16" rx="1.5"/>
+    <rect x="111" y="71" width="16" height="16" rx="1.5"/>
+  </g>
+
+  <!-- Electric green trend line — path: 3→2→1→2→1→0 -->
+  <polyline points="14,79 35,58 56,37 77,58 98,37 119,16"
+    fill="none" stroke="#00ffa3" stroke-width="2.2" opacity="0.75"
+    stroke-linecap="round" stroke-linejoin="round"
+    filter="url(#lineglow)"/>
+
+  <!-- Circuit nodes -->
+  <g fill="#00ffa3">
+    <circle cx="14" cy="79" r="1.5" opacity="0.5"/>
+    <circle cx="35" cy="58" r="1.5" opacity="0.5"/>
+    <circle cx="56" cy="37" r="1.5" opacity="0.6"/>
+    <circle cx="77" cy="58" r="1.5" opacity="0.5"/>
+    <circle cx="98" cy="37" r="1.5" opacity="0.6"/>
+    <circle cx="119" cy="16" r="2" opacity="0.8"/>
+  </g>
+
+  <!-- Digital coordinates -->
+  <g font-family="SF Mono, Fira Code, Menlo, monospace" font-size="3.5" fill="#00c082" opacity="0.18">
+    <text x="19" y="87">0,3</text>
+    <text x="61" y="34">2,1</text>
+    <text x="124" y="13">5,0</text>
+  </g>
+
+  <!-- Signal red K-line -->
+  <g fill="#E63946">
+    <rect x="6"  y="71" width="16" height="16" rx="3"/>
+    <rect x="27" y="50" width="16" height="16" rx="3"/>
+    <rect x="48" y="29" width="16" height="16" rx="3"/>
+    <rect x="69" y="50" width="16" height="16" rx="3"/>
+    <rect x="90" y="29" width="16" height="16" rx="3"/>
+  </g>
+
+  <!-- Peak block — Signal red -->
+  <rect x="111" y="8" width="16" height="16" rx="3" fill="#E63946"/>
+
+  <!-- Divider -->
+  <line x1="145" y1="14" x2="145" y2="80" stroke="#002FA7" stroke-width="0.8" opacity="0.08"/>
+
+  <!--
+    Text — font cascade 28→17→9→8 (scaled from 42→26→12→11)
+    Baselines: 38, 63, 79, 90 → gaps 25, 16, 11 (Fibonacci-scaled)
+  -->
+
+  <!-- Chinese brand name -->
+  <text x="158" y="38" text-anchor="start"
+    font-family="Source Han Sans SC, Noto Sans SC, PingFang SC, sans-serif"
+    font-size="28" font-weight="500" fill="#002FA7" letter-spacing="0.5">量知 <tspan font-family="DIN Alternate, DIN Condensed, Roboto Condensed, sans-serif" font-weight="700" letter-spacing="0.5"><tspan fill="#E63946">AI</tspan>pha</tspan></text>
+
+  <!-- English brand name -->
+  <text x="159" y="63" text-anchor="start"
+    font-family="DIN Alternate, DIN Condensed, Roboto Condensed, sans-serif"
+    font-size="17" font-weight="500" fill="#64748b" letter-spacing="1">Quant<tspan fill="#00c082" textLength="14" lengthAdjust="spacingAndGlyphs">Z</tspan> <tspan fill="#E63946">AI</tspan>pha</text>
+
+  <!-- Chinese slogan -->
+  <text x="159" y="79" text-anchor="start"
+    font-family="Source Han Sans SC, Noto Sans SC, PingFang SC, sans-serif"
+    font-size="9" font-weight="400" fill="#94a3b8" letter-spacing="0.5">深度洞察数据，捕捉超越市场的 Alpha</text>
+
+  <!-- English slogan -->
+  <text x="159" y="90" text-anchor="start"
+    font-family="DIN Alternate, DIN Condensed, Roboto Condensed, sans-serif"
+    font-size="8" font-weight="400" fill="#b0b8c8" letter-spacing="0.5">Decoding Markets with AI for Consistent Alpha.</text>
+
+</svg>
