@@ -76,6 +76,13 @@ alias stock-cache-clear='rm -f /Users/hainingyu/Code/quant_lab/quant_cache.db &&
 stock-warm() { stock --warm-cache "${1:-my}"; }
 alias stock-warm-all='stock --warm-cache all'
 
+# PDF 转换监控
+stock-pdf() {
+    cd /Users/hainingyu/Code/quant_lab
+    python /Users/hainingyu/Code/quant_lab/md2pdf_tool.py --dir /Users/hainingyu/Code/quant_lab/Report "$@"
+}
+alias stock-pdf-stop='pkill -f md2pdf_tool.py && echo "PDF 监控进程已关闭"'
+
 # ============================================
 # 帮助命令
 # ============================================
@@ -109,6 +116,7 @@ alias stock-help='echo "
   stock-warm dad                 预热缓存 Dad
   stock-warm-all                 预热全部缓存
   stock-report                   查看今日报告列表
+  stock-pdf                      🚀 启动 PDF 自动转换监控（实时生成 PDF）
   stock-log                      实时查看运行日志
   stock-cache                    查看缓存状态
   stock-cache-clear              清除所有缓存

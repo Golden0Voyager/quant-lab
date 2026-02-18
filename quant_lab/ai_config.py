@@ -1,8 +1,18 @@
 import os
 import logging
 import socket
+import threading
 import httpx
 from openai import OpenAI
+
+# ==================== Yahoo Finance 代理支持 ====================
+# 线程局部变量：OpenBB/yfinance 的 fetch 线程设置此标志后，
+# monkey-patched Session.__init__ 会自动注入代理到 session.proxies
+# （绕过 trust_env=False 的限制）
+_yahoo_proxy = threading.local()
+
+# 默认代理地址（仅用于 Yahoo Finance，国内 API 全部直连）
+YAHOO_PROXY_URL = os.getenv('YAHOO_PROXY', 'http://127.0.0.1:8118')
 
 # ==================== 全局网络配置优化 ====================
 
@@ -29,12 +39,19 @@ def init_global_network():
 
         def _patched_session_init(self, *args, **kwargs):
             _original_session_init(self, *args, **kwargs)
-            # 东方财富域名绕过系统代理（Clash 会把 push2 等域名误路由到海外节点）
+            # 国内 API 绕过系统代理（Clash 会把东财等域名误路由到海外节点）
             self.trust_env = False
             # 设置通用的真实浏览器 Header
             self.headers.update({
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             })
+
+            # Yahoo Finance 代理注入：当 OpenBB fetch 线程设置了 _yahoo_proxy.active 时，
+            # 直接将代理写入 session.proxies（不依赖 trust_env）
+            if getattr(_yahoo_proxy, 'active', False):
+                proxy_url = getattr(_yahoo_proxy, 'proxy_url', YAHOO_PROXY_URL)
+                if proxy_url:
+                    self.proxies = {'http': proxy_url, 'https': proxy_url}
 
             # 添加自动重试适配器（仅重试 HTTP 状态码错误，连接级错误由上层处理）
             retry_strategy = Retry(
@@ -49,7 +66,7 @@ def init_global_network():
             self.mount("https://", adapter)
 
         requests.Session.__init__ = _patched_session_init
-        logging.info("✅ 全局网络优化已激活 (东财IPv4直连/通用Headers/重试机制)")
+        logging.info("✅ 全局网络优化已激活 (国内直连/Yahoo代理注入/重试机制)")
     except Exception as e:
         logging.warning(f"⚠️ 全局网络优化失败: {e}")
 
@@ -81,14 +98,14 @@ MODEL_CONFIGS = {
     "deepseek": {
         "api_key_env": "DASHSCOPE_API_KEY",
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "model": "deepseek-v3.2",
-        "backup_model": "kimi-k2-thinking",
-        "description": "DeepSeek V3.2 (via DashScope)"
+        "model": "deepseek-v3.1",
+        "backup_model": "qwen-plus",
+        "description": "DeepSeek V3.1 - 主力模型 (V3.2需关闭免费额度限制后切换)"
     },
 }
 
 # 当前激活的配置名称
-ACTIVE_PROFILE = "glm"
+ACTIVE_PROFILE = "deepseek"
 
 def get_current_config():
     """获取当前激活的完整配置字典"""

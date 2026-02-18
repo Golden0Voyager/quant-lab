@@ -114,15 +114,39 @@ def fetch_integrated_data(symbol: str, stock_name: str, asset_type: str = None, 
         return {}
 
     if asset_type == "stock":
-        # 估值维度
-        valuation = safe_fetch(fetch_valuation_data, "估值", symbol, stock_name)
-        enhanced_data.update(valuation)
+        # === 并行获取独立数据维度（无相互依赖的维度同时抓取，大幅缩短等待时间）===
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        # 业绩维度
-        performance = safe_fetch(fetch_performance_data, "业绩", symbol, stock_name)
-        enhanced_data.update(performance)
+        parallel_tasks = {
+            "估值": (fetch_valuation_data, [symbol, stock_name]),
+            "业绩": (fetch_performance_data, [symbol, stock_name]),
+            "资金情绪": (fetch_sentiment_data, [symbol, stock_name]),
+            "宏观": (fetch_macro_etf_data, [symbol, asset_type]),
+            "一致预期": (fetch_consensus_data, [symbol, stock_name]),
+            "大盘环境": (fetch_market_env_data, [symbol, stock_name]),
+            "解禁风险": (fetch_lockup_data, [symbol, stock_name]),
+            "筹码分布": (fetch_chip_data, [symbol, stock_name]),
+            "机构持仓": (fetch_institution_data, [symbol, stock_name]),
+            "竞争对手": (fetch_competitor_data, [symbol, stock_name]),
+            "聪明钱": (fetch_smart_money_data, [symbol, stock_name]),
+            "情绪题材": (fetch_theme_sentiment_data, [symbol, stock_name]),
+        }
 
-        # 计算市销率 PS-TTM
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            future_map = {
+                executor.submit(safe_fetch, func, name, *args): name
+                for name, (func, args) in parallel_tasks.items()
+            }
+            for future in as_completed(future_map):
+                name = future_map[future]
+                try:
+                    result = future.result()
+                    if result:
+                        enhanced_data.update(result)
+                except Exception as e:
+                    logger.warning(f"⚠️ 并行抓取 {name} 异常: {type(e).__name__}")
+
+        # 计算市销率 PS-TTM (依赖估值+业绩数据)
         try:
             market_cap = enhanced_data.get('market_cap')
             revenue_raw = enhanced_data.get('revenue_ttm_raw')
@@ -133,24 +157,12 @@ def fetch_integrated_data(symbol: str, stock_name: str, asset_type: str = None, 
         except:
             pass
 
-    # 资金情绪维度
-    sentiment = safe_fetch(fetch_sentiment_data, "资金情绪", symbol, stock_name)
-    enhanced_data.update(sentiment)
-
-    # 宏观数据
-    macro = safe_fetch(fetch_macro_etf_data, "宏观", symbol, asset_type)
-    enhanced_data.update(macro)
-
-    # 新增6个维度
-    if asset_type == "stock":
-        enhanced_data.update(safe_fetch(fetch_consensus_data, "一致预期", symbol, stock_name))
-        enhanced_data.update(safe_fetch(fetch_market_env_data, "大盘环境", symbol, stock_name))
-        enhanced_data.update(safe_fetch(fetch_lockup_data, "解禁风险", symbol, stock_name))
-        enhanced_data.update(safe_fetch(fetch_chip_data, "筹码分布", symbol, stock_name))
-        enhanced_data.update(safe_fetch(fetch_institution_data, "机构持仓", symbol, stock_name))
-        enhanced_data.update(safe_fetch(fetch_competitor_data, "竞争对手", symbol, stock_name))
-        enhanced_data.update(safe_fetch(fetch_smart_money_data, "聪明钱", symbol, stock_name))
-        enhanced_data.update(safe_fetch(fetch_theme_sentiment_data, "情绪题材", symbol, stock_name))
+    else:
+        # ETF/Index: 仅获取资金情绪和宏观
+        sentiment = safe_fetch(fetch_sentiment_data, "资金情绪", symbol, stock_name)
+        enhanced_data.update(sentiment)
+        macro = safe_fetch(fetch_macro_etf_data, "宏观", symbol, asset_type)
+        enhanced_data.update(macro)
 
     # 3. 合并数据
     integrated_data = {**base_data, **enhanced_data}
@@ -441,6 +453,56 @@ def evaluate_enhanced_signals(data: dict) -> tuple:
         signal_score += 1
         triggers.append(f"🌧 大盘环境偏冷: {data.get('market_index_change_5d', 'N/A')}")
 
+    # 成交量大幅缩量(vs5d < -30%) → +1 (风险)
+    vol_vs_5d_raw = data.get('market_volume_vs_5d_raw')
+    if vol_vs_5d_raw is not None and vol_vs_5d_raw < -30:
+        signal_score += 1
+        triggers.append(f"📉 大盘成交量大幅缩量: vs5日均{data.get('market_volume_vs_5d', 'N/A')}")
+
+    # 南向资金大幅净流入(> 80亿)，资金南下分流A股 → +1 (风险)
+    south_total_raw = data.get('south_total_net_flow_raw')
+    if south_total_raw is not None and south_total_raw > 80:
+        signal_score += 1
+        triggers.append(f"🌧 南向资金大幅南下: {data.get('south_total_net_flow', 'N/A')} (A股资金分流)")
+
+    # Shibor急涨(隔夜涨幅 > 10bp) → +1 (流动性收紧)
+    shibor_chg = data.get('shibor_overnight_change_raw')
+    if shibor_chg is not None and shibor_chg > 10:
+        signal_score += 1
+        triggers.append(f"💰 Shibor急涨: 隔夜{data.get('shibor_overnight_change', 'N/A')} (流动性收紧)")
+
+    # 涨跌比极端(< 0.3) → +1 (恐慌)
+    adr_raw = data.get('market_advance_decline_ratio_raw')
+    if adr_raw is not None and adr_raw < 0.3:
+        signal_score += 1
+        triggers.append(f"🔴 市场恐慌: 涨跌比{data.get('market_advance_decline_ratio', 'N/A')}")
+
+    # 涨停数 > 50 → -1 (市场过热)
+    limit_up = data.get('market_limit_up')
+    if limit_up is not None and limit_up > 50:
+        signal_score -= 1
+        triggers.append(f"🔥 市场过热: 涨停{limit_up}家")
+
+    # ==================== 新增：全球宏观信号（美债收益率 + VIX） ====================
+
+    us10y = data.get('us10y_yield')
+    if us10y and us10y != 'N/A':
+        try:
+            yield_val = float(us10y)
+            if yield_val > 5.0:
+                signal_score += 1
+                triggers.append(f"🌍 美债收益率偏高({yield_val}%)，关注外资动向")
+        except ValueError:
+            pass
+
+    vix_level = data.get('vix_level', '')
+    if vix_level == '恐慌':
+        signal_score += 2
+        triggers.append(f"🔴 VIX恐慌({data.get('vix_index', 'N/A')})，全球risk-off")
+    elif vix_level == '偏高':
+        signal_score += 1
+        triggers.append(f"🟡 VIX偏高({data.get('vix_index', 'N/A')})，市场避险情绪升温")
+
     # ==================== 新增：技术面信号 ====================
 
     # 11. RSI超买超卖信号
@@ -601,6 +663,21 @@ def build_enhanced_prompt(data: dict, analysis_type: str = "worker", prompt_vers
                 prompt += f"""
 ### 大盘环境 (数据截至: {data.get('market_env_data_date', 'N/A')})
 {data.get('market_env_summary', 'N/A')}
+- 主要指数: {data.get('indices_overview', 'N/A')}
+- 成交量: {data.get('market_total_volume', '')} vs5日均{data.get('market_volume_vs_5d', 'N/A')} ({data.get('market_volume_signal', 'N/A')})
+- 涨跌: 涨{data.get('market_up_count', '?')}家/跌{data.get('market_down_count', '?')}家/平{data.get('market_flat_count', '?')}家 涨停{data.get('market_limit_up', '?')}/跌停{data.get('market_limit_down', '?')}
+- 北向资金: {data.get('north_total_net_flow', '已停止实时披露')}
+- 南向资金(港股通): {data.get('south_total_net_flow', 'N/A')} ({data.get('south_flow_direction', 'N/A')})
+- Shibor: 隔夜{data.get('shibor_overnight', 'N/A')}({data.get('shibor_overnight_change', 'N/A')}) | 1周{data.get('shibor_1w', 'N/A')} ({data.get('monetary_signal', 'N/A')})
+- 热门板块: {', '.join(data.get('hot_sectors_top3', [])) or 'N/A'}
+"""
+
+            # 全球宏观背景（OpenBB）
+            if data.get('global_macro_summary') and data.get('global_macro_summary') != 'N/A':
+                prompt += f"""
+### 全球宏观背景
+{data.get('global_macro_summary', 'N/A')}
+- 数据更新: {data.get('global_macro_update', 'N/A')}
 """
 
             # 解禁风险
@@ -632,10 +709,10 @@ def build_enhanced_prompt(data: dict, analysis_type: str = "worker", prompt_vers
 ## 分析要求
 请用1-2段话总结：
 1. 当前市场状态（技术+资金+情绪）
-2. 关键风险点或机会点
+2. 关键风险点或机会点（如有全球宏观数据，请结合美债收益率、美元指数等分析对该标的的影响）
 3. 简要建议（买入/观望/回避）
 
-请保持简洁，控制在200字以内。
+请保持简洁，控制在300字以内。
 """
 
     else:  # brain层
@@ -692,7 +769,22 @@ def _build_brain_prompt(data: dict, stock_name: str, stock_code: str, asset_type
         market_env_section = f"""
 - {data.get('market_env_summary', 'N/A')}
 - 上证5日: {data.get('market_index_change_5d', 'N/A')} | 20日: {data.get('market_index_change_20d', 'N/A')}
+- 主要指数: {data.get('indices_overview', 'N/A')}
+- 成交量: {data.get('market_total_volume', '')} vs5日均{data.get('market_volume_vs_5d', 'N/A')} ({data.get('market_volume_signal', 'N/A')})
+- 涨跌: 涨{data.get('market_up_count', '?')}家/跌{data.get('market_down_count', '?')}家 涨停{data.get('market_limit_up', '?')}/跌停{data.get('market_limit_down', '?')}
+- 涨跌比: {data.get('market_advance_decline_ratio', 'N/A')} ({data.get('market_breadth_signal', 'N/A')})
+- 北向资金: {data.get('north_total_net_flow', '已停止实时披露')}
+- 南向资金(港股通): {data.get('south_total_net_flow', 'N/A')} ({data.get('south_flow_direction', 'N/A')})
+- Shibor隔夜: {data.get('shibor_overnight', 'N/A')}({data.get('shibor_overnight_change', 'N/A')}) | 1周: {data.get('shibor_1w', 'N/A')} | 货币信号: {data.get('monetary_signal', 'N/A')}
 - 板块: {data.get('sector_name', 'N/A')} 排名{data.get('sector_rank', 'N/A')} 今日{data.get('sector_change_today', 'N/A')}
+- 热门板块: {', '.join(data.get('hot_sectors_top3', [])) or 'N/A'}
+- 冷门板块: {', '.join(data.get('cold_sectors_top3', [])) or 'N/A'}
+"""
+
+    # 全球宏观背景（OpenBB）追加到大盘环境区块
+    if data.get('global_macro_summary') and data.get('global_macro_summary') != 'N/A':
+        market_env_section += f"""
+- 全球宏观: {data.get('global_macro_summary', 'N/A')}
 """
 
     # 解禁风险区块
@@ -987,34 +1079,59 @@ Analyze 【{name}】({code})
 - News events and theme sentiment
 - Lockup expiry impact
 
-### Step 4: Risk Assessment (风险评估)
+### Step 4: Global Macro Impact (全球宏观传导)
+- 必须覆盖所有可用宏观数据（利率/汇率/风险指标/大宗商品/全球指数），不要遗漏
+- 传导路径分析：美债收益率 → 中美利差 → 北向资金动向 → 该股外资持仓影响
+- 美元指数/人民币汇率 → 出口型/进口型企业的利润影响
+- VIX → 全球风险偏好 → A股估值压力
+- 原油/黄金/白银 → 上游成本或避险资金流向
+
+### Step 5: Risk Assessment (风险评估)
 - Lockup/restricted shares risk
 - Institutional positioning changes
-- Competitive landscape pressure
+- Competitive landscape pressure (引用竞争对手数据对比)
 
 ## Output Format (请用以下格式输出)
 
 ### 综合评级
-**[看多/中性偏多/中性/中性偏空/看空]** | 置信度：[X]%
+**整体长度控制**：全文控制在1500-2000字以内，精炼有力，避免数据复述。
 
-### 核心逻辑
-[2-3句话，概括投资论点]
+### 一句话结论
+**[看多/中性偏多/中性/中性偏空/看空]** | 置信度：[X]%
+[一句话概括核心判断理由]
+
+### 投资论点
+[不是数据摘要！回答：(1) 为什么现在应该关注？(2) 差异化认知是什么？(3) 催化剂和时间框架]
 
 ### 关键信号
-1. [价值面信号 - 估值是否合理，PEG如何]
-2. [技术面信号 - 趋势和择时，筹码支撑]
-3. [资金面信号 - 聪明钱方向，主力资金流向]
+1. [价值面信号 - 估值是否合理，引用PE/PB/PEG具体数值及历史分位百分比]
+2. [技术面信号 - 趋势和择时，引用MA/RSI/MACD数值]
+3. [资金面信号 - 聪明钱方向，引用主力资金金额、北向资金数据]
 4. [催化剂信号 - 事件或情绪驱动]
-5. [风险信号 - 解禁/机构/竞争]
+5. [竞争格局信号 - 与同行对比ROE/毛利率/增速]
+6. [全球宏观信号 - 必须覆盖所有可用宏观数据，分析传导链条→对该标的的具体影响]
 
-### 操作策略
-- **短线（1-4周）**: [具体建议，包含入场点/目标位/止损位]
-- **中线（1-6个月）**: [建仓区间/持仓策略/止盈条件]
+### 情景分析
+| 情景 | 概率 | 目标价 | 触发条件 |
+|------|------|--------|----------|
+| 牛市 | [X]% | [价格] | [条件] |
+| 基准 | [X]% | [价格] | [条件] |
+| 熊市 | [X]% | [价格] | [条件] |
 
-### 风险提示
-1. [技术面风险]
-2. [基本面风险]
-3. [市场系统性风险/解禁风险]
+### 操作建议（针对不同持仓情况）
+**已持仓盈利**: [继续持有/止盈] + 止盈位和移动止损位
+**已持仓亏损**: [持有/补仓/止损] + 补仓条件或止损位
+**计划建仓**: [入场触发信号/入场价/目标位/止损位，盈亏比≥2:1否则解释原因]
+
+### 风险与论点失效
+1. [风险类型 - 量化影响: 如果发生，股价可能下跌X%]
+2. [风险类型 - 量化影响]
+**论点失效条件**: [出现什么情况应立即重新评估]
+
+### 关注清单
+| 监控项 | 当前值 | 关注阈值 | 意义 |
+|--------|--------|----------|------|
+| [指标] | [值] | [阈值] | [含义] |
 """
 
 
@@ -1102,38 +1219,60 @@ For each factor, assign a score from -2 to +2:
 - Moderate outflow → -1 | Large outflow + margin selling + holder dispersion → -2
 
 **Environment & Risk Scoring Guide:**
-- Bullish market + hot sector + low lockup risk → +2 | Normal env → 0
-- Bear market + cold sector + high lockup risk → -2
+- Bullish market + hot sector + low lockup risk + favorable global macro (US10Y<4%, DXY stable, VIX<15) → +2 | Normal env → 0
+- Bear market + cold sector + high lockup risk + adverse global macro (US10Y>5%, DXY surging, VIX>25) → -2
+- 全球宏观传导分析（必须覆盖所有可用数据）：
+  - 美债收益率 → 中美利差 → 外资流向
+  - 美元指数/人民币汇率 → 出口企业利润
+  - VIX → 全球风险偏好 → A股估值
+  - 原油/黄金/白银 → 行业成本/避险情绪
+  - 恒指/日经/美股指数 → AH联动/行业情绪
 
 ## Output Format (请用以下格式输出)
 
+**整体长度控制**：全文控制在1500-2000字以内，精炼有力。
+
 ### 多因子评分
 
-| 因子 | 得分 | 权重 | 加权分 |
-|------|------|------|--------|
-| 估值 | [X] | 25% | [Y] |
-| 动量/技术 | [X] | 15% | [Y] |
-| 资金/聪明钱 | [X] | 15% | [Y] |
-| 质量 | [X] | 20% | [Y] |
-| 增长/预期 | [X] | 15% | [Y] |
-| 环境/风险 | [X] | 10% | [Y] |
-| **合计** | - | 100% | **[Z]** |
+| 因子 | 得分 | 权重 | 加权分 | 关键依据 |
+|------|------|------|--------|----------|
+| 估值 | [X] | 25% | [Y] | [一句话说明打分理由] |
+| 动量/技术 | [X] | 15% | [Y] | [一句话] |
+| 资金/聪明钱 | [X] | 15% | [Y] | [一句话] |
+| 质量 | [X] | 20% | [Y] | [一句话] |
+| 增长/预期 | [X] | 15% | [Y] | [一句话] |
+| 环境/风险 | [X] | 10% | [Y] | [一句话] |
+| **合计** | - | 100% | **[Z]** | - |
 
-### 综合评级
+### 一句话结论
 **[看多/中性/看空]** | 置信度：[X]% | 综合得分：[Z]
+[一句话概括核心判断理由]
 
-### 投资结论
-[基于得分的投资建议，2-3句话]
+### 投资论点
+[不是得分复述！回答：基于多因子结果，差异化认知是什么？催化剂是什么？]
+
+### 情景分析
+| 情景 | 概率 | 目标价 | 触发条件 |
+|------|------|--------|----------|
+| 牛市 | [X]% | [价格] | [条件] |
+| 基准 | [X]% | [价格] | [条件] |
+| 熊市 | [X]% | [价格] | [条件] |
 
 ### 关键观察点
 1. [最强因子及其信号]
 2. [最弱因子及其风险]
 3. [需关注的边际变化]
 
-### 操作建议
-- **短线策略**: [具体建议，包含价位]
-- **中线策略**: [具体建议，包含价位]
-- **风险控制**: [止损位和仓位建议]
+### 操作建议（针对不同持仓情况）
+**已持仓盈利**: [继续持有/止盈] + 止盈位和移动止损位
+**已持仓亏损**: [持有/补仓/止损] + 补仓条件或止损位
+**计划建仓**: [入场触发信号/价位/目标/止损，盈亏比≥2:1]
+**风险控制**: [止损位/仓位上限/论点失效条件]
+
+### 关注清单
+| 监控项 | 当前值 | 关注阈值 | 意义 |
+|--------|--------|----------|------|
+| [指标] | [值] | [阈值] | [含义] |
 """
 
 
@@ -1160,6 +1299,13 @@ Write a concise investment memo in Chinese (中文).
 - 年度数据（历史分位/年报）：权重低，仅作背景参考
 请在分析中明确指出哪些结论基于滞后数据，可能存在偏差。
 
+**核心分析原则**:
+1. 每个结论必须有数据支撑，禁止空泛措辞（如"不确定性""存在风险"），必须给出具体数字和传导路径
+2. 投资论点 ≠ 数据摘要。不要复述数据，要回答"所以呢？这意味着什么？"
+3. 信号之间要交叉验证：技术面+资金面方向一致才有意义，矛盾时必须指出
+4. 所有可用的宏观数据都必须分析，不要遗漏任何一个（利率/汇率/风险指标/大宗/指数）
+5. 盈亏比<2:1的交易不值得做，除非有充分理由（需要在报告中明确解释）
+
 ## Research Data
 
 ### Valuation & Quote (估值行情)
@@ -1181,9 +1327,11 @@ Write a concise investment memo in Chinese (中文).
 {consensus}
 {institution}
 
+### Competitive Landscape (竞争格局)
+{competitor}
+
 ### Risk Factors (风险因素)
 {lockup}
-{competitor}
 {market_env}
 
 ### News & Sentiment (舆情与题材)
@@ -1193,52 +1341,87 @@ Write a concise investment memo in Chinese (中文).
 ### Extended Data (扩展数据)
 {extended}
 
-## Output Format (请用以下格式输出投资备忘录)
+## Output Format (请严格按以下格式输出投资备忘录)
+
+**整体长度控制**：全文控制在1500-2000字以内，做到精炼有力。每个章节点到为止，避免冗长的数据复述。
+
+### 一句话结论
+**[看多/中性偏多/中性/中性偏空/看空]** | 置信度：[X]%
+[用一句话概括：为什么现在应该买入/持有/回避？直接给出最核心的判断理由]
 
 ---
 
-### 综合评级
-**[看多/中性偏多/中性/中性偏空/看空]** | 置信度：[高/中/低] ([X]%)
-
-### 核心逻辑
-[1-2句话概括投资论点]
+### 投资论点
+[开门见山阐述核心逻辑，不超过3句话。必须回答：(1) 市场可能忽略了什么？ (2) 什么催化剂会驱动股价？ (3) 预计多久兑现？]
 
 ---
 
-### 关键信号
-1. **[估值信号]**: [具体描述，引用数据]
-2. **[技术面信号]**: [具体描述，引用数据]
-3. **[资金/聪明钱信号]**: [具体描述，引用数据]
-4. **[基本面信号]**: [具体描述，引用数据]
-5. **[风险/催化信号]**: [具体描述，引用数据]
+### 关键信号（仅列有意义的信号，无明确信号的维度可跳过）
+
+1. **[估值信号]**: [PE-TTM/PB历史分位 + PEG成长性价比，一句话结论]
+2. **[技术面信号]**: [趋势方向 + 关键支撑压力位，一句话结论]
+3. **[资金/聪明钱信号]**: [大资金方向是否一致？筹码集中度含义？一句话结论]
+4. **[基本面信号]**: [增长来源 + 利润率趋势 + 现金流验证，一句话结论]
+5. **[竞争格局信号]**: [vs 2个竞争对手的关键数据对比]
+6. **[全球宏观信号]**: [覆盖所有可用宏观数据，重点分析传导链：
+   - 利率端：美债10Y → 中美利差 → 北向资金 → 对该股影响
+   - 汇率端：美元/人民币 → 出口型/进口型利润影响
+   - 风险端：VIX → 全球风险偏好 → A股估值
+   - 大宗端：原油/黄金 → 上游成本或下游需求
+   - 联动端：恒指/美股 → AH溢价/板块情绪传导]
 
 ---
 
-### 操作策略
+### 情景分析
 
-**短线策略（1-4周）**:
-- 建议: [买入/观望/卖出]
-- 入场区间: [价格区间]
-- 目标位: [价格]
-- 止损位: [价格]
-- 仓位: [建议比例]
+| 情景 | 概率 | 目标价 | 触发条件 |
+|------|------|--------|----------|
+| **牛市** | [X]% | [价格] | [触发条件] |
+| **基准** | [X]% | [价格] | [最可能路径] |
+| **熊市** | [X]% | [价格] | [风险条件] |
 
-**中线策略（1-6个月）**:
-- 建议: [建仓/持有/减仓]
-- 理想布局区间: [价格区间]
-- 目标位: [价格]
-- 止损位: [价格]
+---
+
+### 操作建议（请针对不同持仓情况分别给出建议）
+
+**如果你已持仓且盈利：**
+- [继续持有/分批止盈/全部离场] + 具体操作触发条件
+- 止盈位: [价格] | 移动止损位: [价格]
+
+**如果你已持仓且亏损：**
+- [持有等反弹/补仓摊低/止损离场] + 具体理由和触发条件
+- 补仓条件: [什么信号出现时可补仓？补多少？]
+- 止损位: [价格]（跌破必须离场的理由）
+
+**如果你计划建仓：**
+- 建议: [立即建仓/等待回调建仓/暂时观望]
+- 入场触发: [具体信号——如突破均线/放量站稳/回踩支撑确认]
+- 入场区间: [价格区间] + 分批节奏（首仓X%在Y元，加仓条件）
+- 目标位: [价格] | 止损位: [价格]
+- **盈亏比**: [目标收益% : 止损亏损% = X : Y]（R:R<2:1需解释合理性或建议观望）
+- 仓位上限: [X]%
 
 ---
 
 ### 风险提示
-1. **[风险类型]**: [风险描述] *(注明数据时效性)*
-2. **[风险类型]**: [风险描述] *(注明数据时效性)*
-3. **[解禁/减持风险]**: [风险描述]
+
+1. **[风险类型]**: [描述 + 若发生股价可能跌X%]
+2. **[风险类型]**: [描述 + 量化影响]
+3. **[风险类型]**: [描述 + 量化影响]
+
+**论点失效条件**（出现以下任一情况，应立即重新评估）:
+- [条件1] | [条件2]
 
 ---
 
-**免责声明**：本分析基于公开数据和量化模型，不构成投资建议。股市有风险，投资需谨慎。
+### 关注清单
+
+| 监控项 | 当前值 | 关注阈值 | 意义 |
+|--------|--------|----------|------|
+| [关键指标1] | [当前值] | [触发值] | [含义] |
+| [关键指标2] | [当前值] | [触发值] | [含义] |
+
+**近期关键日期**: [财报日、解禁日、股东大会等]
 """
 
 
@@ -1275,7 +1458,7 @@ Analyze ETF/LOF 【{name}】({code})
 - Relative strength vs major indices
 - Seasonal or policy catalysts
 
-## Output Format (请用以下格式输出)
+## Output Format (请用以下格式输出，全文控制在800字以内)
 
 ### 赛道判断
 **[强势/中性/弱势]** | 趋势阶段: [上升/震荡/下行]
@@ -1287,16 +1470,16 @@ Analyze ETF/LOF 【{name}】({code})
 - 支撑位: [价位] (依据)
 - 压力位: [价位] (依据)
 
-### 配置建议
-- **短线（1-4周）**: [加仓/持有/减仓] — [理由]
-- **中线（1-6月）**: [建议仓位比例] — [理由]
+### 操作建议（针对不同持仓情况）
+**已持仓盈利**: [继续持有/止盈] + 具体操作条件
+**已持仓亏损**: [持有/补仓/止损] + 具体理由
+**计划建仓**: [加仓/持有/减仓] — [理由和入场条件]
+**中线配置**: [建议仓位比例] — [理由]
 
 ### 风险提示
 1. [赛道风险]
 2. [流动性风险]
 3. [系统性风险]
-
-**免责声明**：本分析基于公开数据和量化模型，不构成投资建议。
 """
 
 
@@ -1328,7 +1511,7 @@ Determine current market regime:
 - 震荡市: Moderate exposure (40-60%)
 - 熊市: Defensive (20-40%)
 
-## Output Format (请用以下格式输出)
+## Output Format (请用以下格式输出，全文控制在800字以内)
 
 ### 市场环境
 **[牛市/震荡市/熊市]** | 阶段: [具体描述]

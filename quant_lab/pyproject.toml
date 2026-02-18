@@ -10,6 +10,12 @@ dependencies = [
     "markdown>=3.7",
     "matplotlib>=3.10.8",
     "openai>=2.11.0",
+    "openbb>=4.6.0",
+    "openbb-core>=1.5.9",
+    "openbb-fred>=1.5.1",
+    "openbb-yfinance>=1.5.2",
     "openpyxl>=3.1.5",
     "pandas>=2.3.3",
+    "playwright>=1.49.0",
+    "watchdog>=6.0.0",
 ]

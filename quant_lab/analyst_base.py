@@ -155,33 +155,82 @@ def clean_code_for_akshare(code, asset_type):
             return f"sz{code}"
     return code
 
-# --- 辅助函数：K线数据获取（带重试 + 雪球优先策略） ---
-@retry_on_failure(max_retries=3, delay=1, backoff=2)
+# --- 辅助函数：代码格式转换（6位纯数字 → sh/sz前缀） ---
+def _to_sina_symbol(clean_symbol):
+    """将6位纯数字代码转为新浪/腾讯格式 (sh600000 / sz002594)"""
+    if clean_symbol.startswith(('sh', 'sz')):
+        return clean_symbol
+    if clean_symbol.startswith('6'):
+        return f"sh{clean_symbol}"
+    return f"sz{clean_symbol}"
+
+# --- 辅助函数：统一K线列名为中文 ---
+_KLINE_COL_MAP = {
+    'close': '收盘', 'open': '开盘', 'high': '最高', 'low': '最低',
+    'volume': '成交量', 'amount': '成交额', 'date': '日期',
+}
+
+def _normalize_kline_columns(df):
+    """将英文列名统一为中文（兼容东财/新浪/腾讯格式）"""
+    df = df.rename(columns=_KLINE_COL_MAP)
+    if '日期' in df.columns:
+        df['日期'] = pd.to_datetime(df['日期'])
+    return df
+
+# --- 辅助函数：K线数据获取（多源容错：东财 → 新浪 → 腾讯） ---
+@retry_on_failure(max_retries=2, delay=1, backoff=2)
 def fetch_kline_data(asset_type, clean_symbol, start_date, end_date):
     """
-    获取K线数据（雪球优先方案）
+    获取K线数据（多源容错方案）
+    优先级: 东财(push2his) → 新浪(stock_zh_a_daily) → 腾讯(stock_zh_a_hist_tx)
     """
-    xq_token = os.getenv('XUEQIU_TOKEN') or os.getenv('XQ_TOKEN')
-    
-    # 1. 指数逻辑 (指数目前东财较稳，维持现状)
+    # 1. 指数逻辑 (东财指数接口走不同域名，通常可用)
     if asset_type == 'index':
         df = ak.stock_zh_index_daily(symbol=clean_symbol)
-        df.rename(columns={'close': '收盘', 'open': '开盘', 'high': '最高', 'low': '最低', 'volume': '成交量'}, inplace=True)
-        return df
+        return _normalize_kline_columns(df)
 
-    # 2. 个股与 ETF — 直接使用东财（stock_zh_a_hist_xq 已在 akshare 1.17 移除）
-
-    # 3. 降级回东财 (使用带直连的 context)
-    try:
-        from analyst_data import no_proxy
-    except ImportError:
-        @contextmanager
-        def no_proxy(): yield
-
+    # 2. ETF逻辑
     if asset_type == 'etf':
         return ak.fund_etf_hist_em(symbol=clean_symbol, period="daily", start_date=start_date.strftime("%Y%m%d"), end_date=end_date.strftime("%Y%m%d"), adjust="qfq")
-    else:
-        return ak.stock_zh_a_hist(symbol=clean_symbol, period="daily", start_date=start_date.strftime("%Y%m%d"), end_date=end_date.strftime("%Y%m%d"), adjust="qfq")
+
+    # 3. 个股：多源容错
+    start_str = start_date.strftime("%Y%m%d")
+    end_str = end_date.strftime("%Y%m%d")
+    sina_symbol = _to_sina_symbol(clean_symbol)
+
+    # 策略1: 东财 (push2his.eastmoney.com)
+    try:
+        df = ak.stock_zh_a_hist(symbol=clean_symbol, period="daily", start_date=start_str, end_date=end_str, adjust="qfq")
+        if df is not None and not df.empty:
+            logging.info(f"✓ K线数据(东财): {len(df)}条")
+            return df
+    except Exception as e:
+        logging.debug(f"K线(东财)失败: {type(e).__name__}: {str(e)[:80]}")
+
+    # 策略2: 新浪 (stock_zh_a_daily) — 返回全量历史，需手动截取日期范围
+    try:
+        df = ak.stock_zh_a_daily(symbol=sina_symbol, start_date=start_str, end_date=end_str, adjust="qfq")
+        if df is not None and not df.empty:
+            df = _normalize_kline_columns(df)
+            logging.info(f"✓ K线数据(新浪): {len(df)}条")
+            return df
+    except Exception as e:
+        logging.debug(f"K线(新浪)失败: {type(e).__name__}: {str(e)[:80]}")
+
+    # 策略3: 腾讯 (stock_zh_a_hist_tx) — 备用
+    try:
+        df = ak.stock_zh_a_hist_tx(symbol=sina_symbol, start_date=start_str, end_date=end_str, adjust="qfq")
+        if df is not None and not df.empty:
+            df = _normalize_kline_columns(df)
+            # 腾讯源无成交量列，补充为0
+            if '成交量' not in df.columns:
+                df['成交量'] = 0
+            logging.info(f"✓ K线数据(腾讯): {len(df)}条")
+            return df
+    except Exception as e:
+        logging.debug(f"K线(腾讯)失败: {type(e).__name__}: {str(e)[:80]}")
+
+    raise ConnectionError(f"所有K线数据源均失败: {clean_symbol}")
 
 # --- 辅助函数：资金流向获取（带重试） ---
 @retry_on_failure(max_retries=3, delay=1, backoff=2)

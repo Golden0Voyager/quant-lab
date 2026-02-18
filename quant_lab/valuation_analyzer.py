@@ -35,6 +35,7 @@ try:
         fetch_theme_sentiment_data,
         fetch_support_resistance_data,
         fetch_news_data,
+        fetch_kline_multi_source,
     )
 except ImportError:
     # 兼容性：如果导入失败，定义空函数
@@ -48,6 +49,7 @@ except ImportError:
     def fetch_theme_sentiment_data(symbol, stock_name): return {}
     def fetch_support_resistance_data(symbol, stock_name, context=None): return {}
     def fetch_news_data(symbol, stock_name): return {}
+    def fetch_kline_multi_source(symbol, start_date, end_date, adjust='qfq'): return None
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -612,15 +614,9 @@ class ValuationAnalyzer:
             end_date = datetime.now().strftime('%Y%m%d')
             start_date = (datetime.now() - timedelta(days=400)).strftime('%Y%m%d')
 
-            hist_df = ak.stock_zh_a_hist(
-                symbol=symbol,
-                period='daily',
-                start_date=start_date,
-                end_date=end_date,
-                adjust='qfq'
-            )
+            hist_df = fetch_kline_multi_source(symbol, start_date, end_date, adjust='qfq')
 
-            if not hist_df.empty:
+            if hist_df is not None and not hist_df.empty:
                 # 计算均线
                 hist_df['MA5'] = hist_df['收盘'].rolling(window=5).mean()
                 hist_df['MA10'] = hist_df['收盘'].rolling(window=10).mean()
@@ -821,16 +817,15 @@ class ValuationAnalyzer:
                 logger.debug("最新分红为空或为0")
                 return None
 
-            # 2. 获取当前股价
-            df_price = ak.stock_zh_a_hist(
-                symbol=symbol,
-                period='daily',
-                start_date=(datetime.now() - pd.Timedelta(days=7)).strftime('%Y%m%d'),
-                end_date=datetime.now().strftime('%Y%m%d'),
+            # 2. 获取当前股价（多源容错）
+            df_price = fetch_kline_multi_source(
+                symbol,
+                (datetime.now() - pd.Timedelta(days=7)).strftime('%Y%m%d'),
+                datetime.now().strftime('%Y%m%d'),
                 adjust=''
             )
 
-            if df_price.empty:
+            if df_price is None or df_price.empty:
                 logger.debug("未获取到最新股价")
                 return None
 

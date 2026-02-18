@@ -356,6 +356,10 @@ class AnalystBrain:
                     ],
                     temperature=0.3
                 )
+                # 记录 token 使用量
+                if hasattr(completion, 'usage') and completion.usage:
+                    u = completion.usage
+                    logger.info(f"📊 Token: 输入={u.prompt_tokens} 输出={u.completion_tokens} 总计={u.total_tokens}")
                 return completion.choices[0].message.content
 
             except Exception as e:
