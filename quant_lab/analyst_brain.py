@@ -360,7 +360,11 @@ class AnalystBrain:
                 if hasattr(completion, 'usage') and completion.usage:
                     u = completion.usage
                     logger.info(f"📊 Token: 输入={u.prompt_tokens} 输出={u.completion_tokens} 总计={u.total_tokens}")
-                return completion.choices[0].message.content
+                content = completion.choices[0].message.content
+                # 清理 R1 等推理模型的思考链标签
+                if content and '<think>' in content:
+                    content = re.sub(r'<think>.*?</think>\s*', '', content, flags=re.DOTALL)
+                return content
 
             except Exception as e:
                 last_error = e
