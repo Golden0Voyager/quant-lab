@@ -47,13 +47,92 @@ logging.basicConfig(
 
 # ==================== 直连模式（已停用：本地代理是必要通道） ====================
 
+_data_lock = threading.Lock()
+
+# 行业分类缓存: symbol -> industry_name
+_industry_cache = {}
+
+
+def _get_industry(symbol: str) -> str:
+    """统一获取行业分类（带缓存），优先业绩报表、备选雪球、最后东财"""
+    if symbol in _industry_cache:
+        return _industry_cache[symbol]
+
+    industry = None
+
+    # 策略1: 业绩报表（最稳定，复用已有缓存）
+    try:
+        from datetime import datetime as _dt
+        now = _dt.now()
+        year = now.year
+        month = now.month
+        if month >= 10:
+            report_date = f"{year}0930"
+        elif month >= 7:
+            report_date = f"{year}0630"
+        elif month >= 4:
+            report_date = f"{year}0331"
+        else:
+            report_date = f"{year-1}0930"
+
+        global _yjbb_cache
+        if report_date not in _yjbb_cache:
+            with no_proxy(), _data_lock:
+                _yjbb_cache[report_date] = ak.stock_yjbb_em(date=report_date)
+        yjbb_df = _yjbb_cache.get(report_date)
+        if yjbb_df is not None and not yjbb_df.empty:
+            row = yjbb_df[yjbb_df['股票代码'] == symbol]
+            if not row.empty:
+                industry = row.iloc[0].get('所处行业')
+                if industry:
+                    logging.debug(f"行业分类(业绩报表): {symbol} -> {industry}")
+    except Exception:
+        pass
+
+    # 策略2: 雪球
+    if not industry:
+        try:
+            industry = _fetch_industry_from_xueqiu(symbol)
+            if industry:
+                logging.debug(f"行业分类(雪球): {symbol} -> {industry}")
+        except Exception:
+            pass
+
+    # 策略3: 东财（不稳定）
+    if not industry:
+        try:
+            with no_proxy(), _data_lock:
+                info_df = ak.stock_individual_info_em(symbol=symbol)
+            if info_df is not None and not info_df.empty:
+                row = info_df[info_df['item'] == '行业']
+                if not row.empty:
+                    industry = row.iloc[0]['value']
+                    logging.debug(f"行业分类(东财): {symbol} -> {industry}")
+        except Exception:
+            pass
+
+    _industry_cache[symbol] = industry
+    return industry
+
+
 @contextmanager
 def no_proxy():
     """
-    保留接口兼容性，不再实际禁用代理。
-    本地代理(如 Clash 127.0.0.1:8118)是访问东方财富等接口的必要网络通道。
+    真正禁用代理环境变量，强制 Python 的 requests 库直连。
+    用于解决开启全局代理时，国内金融 API (东财/新浪) 访问缓慢或握手失败的问题。
+    注意：即使用户设置了 7897 等自定义端口，此装饰器也会将其暂时移除。
     """
-    yield
+    proxy_keys = ('http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'all_proxy', 'ALL_PROXY')
+    saved_proxies = {key: os.environ[key] for key in proxy_keys if key in os.environ}
+    
+    for key in saved_proxies:
+        del os.environ[key]
+        
+    try:
+        yield
+    finally:
+        for key, value in saved_proxies.items():
+            os.environ[key] = value
 
 
 # ==================== K线数据获取辅助（多源容错） ====================
@@ -294,11 +373,8 @@ def fetch_valuation_data(symbol: str, stock_name: str) -> dict:
 
 
                 report_date = f"{current_date.year}0930" if month >= 10 else (f"{current_date.year}0630" if month >= 7 else (f"{current_date.year}0331" if month >= 4 else f"{current_date.year-1}1231"))
-
-
-                yjbb_df = ak.stock_yjbb_em(date=report_date)
-
-
+                with no_proxy(), _data_lock:
+                    yjbb_df = ak.stock_yjbb_em(date=report_date)
                 row = yjbb_df[yjbb_df['股票代码'] == symbol].iloc[0]
 
 
@@ -345,11 +421,8 @@ def fetch_valuation_data(symbol: str, stock_name: str) -> dict:
 
 
                 # 获取市值
-
-
-                info_df = ak.stock_individual_info_em(symbol=symbol)
-
-
+                with no_proxy(), _data_lock:
+                    info_df = ak.stock_individual_info_em(symbol=symbol)
                 data['market_cap'] = _safe_float(dict(zip(info_df['item'], info_df['value'])).get('总市值'))
 
 
@@ -509,7 +582,8 @@ def fetch_performance_data(symbol: str, stock_name: str) -> dict:
             # 检查缓存
             cache_key = report_date
             if cache_key not in _yjbb_cache:
-                _yjbb_cache[cache_key] = ak.stock_yjbb_em(date=report_date)
+                with no_proxy(), _data_lock:
+                    _yjbb_cache[cache_key] = ak.stock_yjbb_em(date=report_date)
 
             yjbb_df = _yjbb_cache[cache_key]
 
@@ -647,7 +721,7 @@ def fetch_sentiment_data(symbol: str, stock_name: str) -> dict:
         # 策略2: 降级到东财基础信息
         if 'turnover_rate' not in data:
             try:
-                with no_proxy():
+                with no_proxy(), _data_lock:
                     info_df = ak.stock_individual_info_em(symbol=symbol)
                 if not info_df.empty:
                     info_dict = dict(zip(info_df['item'], info_df['value']))
@@ -958,13 +1032,7 @@ def fetch_industry_comparison(symbol: str, stock_name: str, report_date: str = '
     data = {}
     try:
         logging.info(f"📊 获取行业对比: {stock_name}")
-        # 获取行业分类
-        info_df = ak.stock_individual_info_em(symbol=symbol)
-        industry = None
-        if info_df is not None and not info_df.empty:
-            row = info_df[info_df['item'] == '行业']
-            if not row.empty:
-                industry = row.iloc[0]['value']
+        industry = _get_industry(symbol)
 
         if not industry:
             return data
@@ -972,7 +1040,8 @@ def fetch_industry_comparison(symbol: str, stock_name: str, report_date: str = '
         data['industry_name'] = industry
 
         # 获取业绩报表
-        df = ak.stock_yjbb_em(date=report_date)
+        with no_proxy(), _data_lock:
+            df = ak.stock_yjbb_em(date=report_date)
         if df is None or df.empty:
             return data
 
@@ -1611,54 +1680,43 @@ def fetch_market_env_data(symbol: str, stock_name: str) -> dict:
         data['market_sentiment_score'] = sentiment_score
 
         # ==================== 原有逻辑：个股所属行业 ====================
-        # 2. 获取个股所属行业
-        sector_name = None
-        try:
-            info_df = ak.stock_individual_info_em(symbol=symbol)
-            if info_df is not None and not info_df.empty:
-                row = info_df[info_df['item'] == '行业']
-                if not row.empty:
-                    sector_name = row.iloc[0]['value']
-                    data['sector_name'] = sector_name
-        except Exception as e:
-            logging.warning(f"行业信息获取失败: {type(e).__name__}")
+        # 2. 获取个股所属行业（统一多源+缓存）
+        sector_name = _get_industry(symbol)
+        if sector_name:
+            data['sector_name'] = sector_name
 
         # 3. 行业板块排名（模块级缓存，5分钟内复用）
-        #    数据源: 东财EM(主) → 同花顺THS(备)
-        #    统一绕过代理: 国内API直连更稳定，避免前序API调用耗尽代理连接池
         if (_board_cache['data'] is None or _board_cache['time'] is None or
                 (now - _board_cache['time']).total_seconds() > 300):
-            saved_proxies = {}
-            for pkey in ('http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY'):
-                if pkey in os.environ:
-                    saved_proxies[pkey] = os.environ.pop(pkey)
-            try:
-                # 策略1: 东财
+            with no_proxy(), _data_lock:
                 try:
-                    board_df = ak.stock_board_industry_name_em()
-                    if board_df is not None and not board_df.empty:
-                        _board_cache['data'] = board_df
-                        _board_cache['time'] = now
-                        logging.info(f"✓ 行业板块(东财): {len(board_df)}个行业")
-                except Exception as e:
-                    logging.debug(f"行业板块(东财)失败: {type(e).__name__}: {str(e)[:60]}")
-                # 策略2: 同花顺 (列名不同，需统一)
-                if _board_cache['data'] is None:
+                    # 策略1: 东财
                     try:
-                        board_df = ak.stock_board_industry_summary_ths()
+                        board_df = ak.stock_board_industry_name_em()
                         if board_df is not None and not board_df.empty:
-                            board_df = board_df.rename(columns={
-                                '板块': '板块名称',
-                                '净流入': '主力净流入',
-                                '总成交额': '成交额',
-                            })
                             _board_cache['data'] = board_df
                             _board_cache['time'] = now
-                            logging.info(f"✓ 行业板块(同花顺): {len(board_df)}个行业")
+                            logging.info(f"✓ 行业板块(东财): {len(board_df)}个行业")
                     except Exception as e:
-                        logging.debug(f"行业板块(同花顺)也失败: {type(e).__name__}: {str(e)[:60]}")
-            finally:
-                os.environ.update(saved_proxies)
+                        logging.debug(f"行业板块(东财)失败: {type(e).__name__}: {str(e)[:60]}")
+                    
+                    # 策略2: 同花顺 (列名不同，需统一)
+                    if _board_cache['data'] is None:
+                        try:
+                            board_df = ak.stock_board_industry_summary_ths()
+                            if board_df is not None and not board_df.empty:
+                                board_df = board_df.rename(columns={
+                                    '板块': '板块名称',
+                                    '净流入': '主力净流入',
+                                    '总成交额': '成交额',
+                                })
+                                _board_cache['data'] = board_df
+                                _board_cache['time'] = now
+                                logging.info(f"✓ 行业板块(同花顺): {len(board_df)}个行业")
+                        except Exception as e:
+                            logging.debug(f"行业板块(同花顺)也失败: {type(e).__name__}: {str(e)[:60]}")
+                except Exception as e:
+                    logging.error(f"行业板块排行获取失败: {e}")
 
         if _board_cache['data'] is not None and not _board_cache['data'].empty and sector_name:
             board_df = _board_cache['data']
@@ -2395,28 +2453,8 @@ def fetch_competitor_data(symbol: str, stock_name: str) -> dict:
 
         data['competitor_data_date'] = f"{report_date[:4]}-{report_date[4:6]}-{report_date[6:]}"
 
-        # 1. 获取行业分类 (多源优先逻辑)
-        industry = None
-        xq_token = os.getenv('XUEQIU_TOKEN') or os.getenv('XQ_TOKEN')
-
-        # 策略1: 优先尝试雪球 (因为东财 push2 最近极其不稳定)
-        if xq_token:
-            try:
-                industry = _fetch_industry_from_xueqiu(symbol)
-                if industry: logging.info(f"✓ 行业分类获取成功 (源: 雪球): {industry}")
-            except: pass
-
-        # 策略2: 备份尝试东财
-        if not industry:
-            try:
-                with no_proxy():
-                    info_df = ak.stock_individual_info_em(symbol=symbol)
-                if info_df is not None and not info_df.empty:
-                    row = info_df[info_df['item'] == '行业']
-                    if not row.empty:
-                        industry = row.iloc[0]['value']
-                        logging.info(f"✓ 行业分类获取成功 (源: 东财): {industry}")
-            except: pass
+        # 1. 获取行业分类 (统一多源+缓存)
+        industry = _get_industry(symbol)
 
         if not industry:
             data['competitor_summary'] = '无法获取行业分类'
@@ -2428,7 +2466,7 @@ def fetch_competitor_data(symbol: str, stock_name: str) -> dict:
         # 2. 获取同行业业绩数据（复用缓存）
         try:
             if report_date not in _yjbb_cache:
-                with no_proxy():
+                with no_proxy(), _data_lock:
                     _yjbb_cache[report_date] = ak.stock_yjbb_em(date=report_date)
 
             yjbb_df = _yjbb_cache[report_date]

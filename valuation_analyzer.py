@@ -21,6 +21,33 @@ import akshare as ak
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
+from contextlib import contextmanager
+import threading
+from analyst_data import _get_industry
+
+# ==================== 直连模式与并发控制 ====================
+
+_data_lock = threading.Lock()
+
+
+@contextmanager
+def no_proxy():
+    """
+    真正禁用代理环境变量，强制 Python 的 requests 库直连。
+    用于解决开启全局代理时，国内金融 API (东财/新浪) 访问缓慢或握手失败的问题。
+    注意：即使用户设置了 7897 等自定义端口，此装饰器也会将其暂时移除。
+    """
+    proxy_keys = ('http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'all_proxy', 'ALL_PROXY')
+    saved_proxies = {key: os.environ[key] for key in proxy_keys if key in os.environ}
+    
+    for key in saved_proxies:
+        del os.environ[key]
+        
+    try:
+        yield
+    finally:
+        for key, value in saved_proxies.items():
+            os.environ[key] = value
 
 # 导入新增维度的 fetch 函数
 try:
@@ -461,7 +488,8 @@ class ValuationAnalyzer:
 
             # 2. 东方财富获取市值
             try:
-                df_info = ak.stock_individual_info_em(symbol=symbol)
+                with no_proxy(), _data_lock:
+                    df_info = ak.stock_individual_info_em(symbol=symbol)
                 if not df_info.empty:
                     info_dict = dict(zip(df_info['item'], df_info['value']))
                     market_cap = self._safe_float(info_dict.get('总市值'))
@@ -880,13 +908,7 @@ class ValuationAnalyzer:
         result = {}
         try:
             logger.info(f"📊 获取行业对比: {stock_name}")
-            # 先获取行业分类
-            info_df = ak.stock_individual_info_em(symbol=symbol)
-            industry = None
-            if info_df is not None and not info_df.empty:
-                row = info_df[info_df['item'] == '行业']
-                if not row.empty:
-                    industry = row.iloc[0]['value']
+            industry = _get_industry(symbol)
 
             if not industry:
                 logger.warning("未获取到行业分类")
@@ -895,7 +917,8 @@ class ValuationAnalyzer:
             result['industry_name'] = industry
 
             # 获取业绩报表
-            df = ak.stock_yjbb_em(date=report_date)
+            with no_proxy(), _data_lock:
+                df = ak.stock_yjbb_em(date=report_date)
             if df is None or df.empty:
                 return result
 
@@ -1404,7 +1427,8 @@ class ValuationAnalyzer:
 
             # === 3. 获取股本结构数据 ===
             try:
-                df_info = ak.stock_individual_info_em(symbol=symbol)
+                with no_proxy(), _data_lock:
+                    df_info = ak.stock_individual_info_em(symbol=symbol)
 
                 if not df_info.empty:
                     info_dict = dict(zip(df_info['item'], df_info['value']))
