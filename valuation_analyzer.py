@@ -399,9 +399,20 @@ class ValuationAnalyzer:
 
     def _convert_symbol(self, symbol: str, market: str = 'A') -> str:
         """转换代码格式为雪球格式"""
-        if market == 'HK':
+        # 自动探测是否为港股 (5位数字 或 带有.HK后缀)
+        is_hk = (len(symbol) == 5 and symbol.isdigit()) or symbol.endswith('.HK')
+        # 自动探测是否为美股 (纯字母，或带.的纯字母如 BRK.B)
+        is_us = symbol.isalpha() or ('.' in symbol and symbol.replace('.', '').isalpha())
+        
+        if market == 'HK' or is_hk:
             # 港股代码格式：直接返回5位代码
-            return symbol.zfill(5)
+            clean_hk = symbol.replace('.HK', '')
+            return clean_hk.zfill(5)
+            
+        if market == 'US' or is_us:
+            # 美股代码格式：直接返回
+            return symbol
+            
         # A股代码格式
         if symbol.startswith(('000', '001', '002', '003', '300')):
             return f"SZ{symbol}"

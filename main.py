@@ -17,7 +17,7 @@ import ai_config
 ai_config.init_global_network()
 
 # === 使用带缓存的四维数据抓取（性能提升100倍+） ===
-from analyst_integration import fetch_stock_data, build_enhanced_prompt
+from analyst_integration import fetch_stock_data, fetch_integrated_data, detect_asset_type, build_enhanced_prompt
 from analyst_brain import AnalystBrain
 from stock_finder import smart_stock_query, StockFinder
 from valuation_analyzer import ValuationAnalyzer
@@ -255,7 +255,7 @@ def run_global_stock_mode(ticker):
 def run_single_stock_mode(stock_code, stock_name=None, analysis_mode="auto", prompt_version="professional"):
     market = 'A'
     if stock_name is None or not stock_code.isdigit():
-        resolved_code, resolved_name, resolved_market = smart_stock_query(stock_code)
+        resolved_code, resolved_name, resolved_market, asset_type = smart_stock_query(stock_code)
         if resolved_code is None: return
         stock_code, stock_name, market = resolved_code, resolved_name, resolved_market or 'A'
 
@@ -314,6 +314,30 @@ def run_single_stock_mode(stock_code, stock_name=None, analysis_mode="auto", pro
     except Exception as e:
         logging.error(f"❌ AI分析失败: {e}")
 
+# ============================================================
+# 自选股统一数据调度（股票 / ETF / 基金）
+# ============================================================
+
+def fetch_watchlist_item_data(code: str, name: str) -> dict:
+    """
+    统一的自选股数据调度函数。
+    根据资产类型自动选择数据获取路径：
+      - ETF / 场外基金 → FundAnalyst（穿透持仓）
+      - A股 → 四维数据集成管线（技术+资金+舆情+估值）
+    返回的 dict 中包含 'asset_type' 字段标识类型。
+    """
+    asset_type = detect_asset_type(code)
+    if asset_type in ('etf', 'fund'):
+        data = fetch_integrated_data(code, name, asset_type=asset_type, use_cache=True)
+        data['asset_type'] = asset_type
+        data['_is_fund'] = True
+    else:
+        data = fetch_stock_data(code, name)
+        data['asset_type'] = asset_type
+        data['_is_fund'] = False
+    return data
+
+
 def run_monitor_mode(watchlist_name="my", analysis_mode="fast", prompt_version="professional"):
     watchlist = WATCHLIST_MAP.get(watchlist_name, MY_WATCHLIST)
     brain = AnalystBrain(model=ai_config.get_primary_model_name(), prompt_version=prompt_version) if analysis_mode in ['deep', 'auto'] else None
@@ -331,15 +355,18 @@ def run_monitor_mode(watchlist_name="my", analysis_mode="fast", prompt_version="
     fetch_done = [0]
 
     with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {executor.submit(fetch_stock_data, s['code'], s['name']): s for s in watchlist}
+        # 使用统一调度函数，自动识别并分流基金 / ETF / 股票
+        futures = {executor.submit(fetch_watchlist_item_data, s['code'], s['name']): s for s in watchlist}
         for future in as_completed(futures):
             stock = futures[future]
             try:
-                stock_data_map[stock['code']] = (stock, future.result())
+                item_data = future.result()
+                stock_data_map[stock['code']] = (stock, item_data)
                 with fetch_lock:
                     fetch_done[0] += 1
                     elapsed = time.time() - fetch_start
-                    print(f"  [{fetch_done[0]}/{total}] ✓ {stock['name']}({stock['code']}) 就绪 ({elapsed:.1f}s)")
+                    asset_tag = "📦基金" if item_data.get('_is_fund') else "📈股票"
+                    print(f"  [{fetch_done[0]}/{total}] ✓ {asset_tag} {stock['name']}({stock['code']}) 就绪 ({elapsed:.1f}s)")
             except Exception as e:
                 with fetch_lock:
                     fetch_done[0] += 1
@@ -351,7 +378,11 @@ def run_monitor_mode(watchlist_name="my", analysis_mode="fast", prompt_version="
     # 准备所有分析任务
     analysis_tasks = []
     for code, (stock, data) in stock_data_map.items():
-        use_deep, triggers, score = (True, ["强制深度"], 0) if analysis_mode == 'deep' else (brain.evaluate_signal_strength_v2(data) if (analysis_mode == 'auto' and brain) else (False, [], 0))
+        # 基金/ETF 跳过信号强度评估（无 tech_summary/money_summary 字段）
+        if data.get('_is_fund'):
+            use_deep, triggers, score = False, [], 0
+        else:
+            use_deep, triggers, score = (True, ["强制深度"], 0) if analysis_mode == 'deep' else (brain.evaluate_signal_strength_v2(data) if (analysis_mode == 'auto' and brain) else (False, [], 0))
         analysis_tasks.append((code, stock, data, use_deep, triggers, score))
 
     # 并行执行 AI 分析（限制并发数 + 限流）
@@ -369,6 +400,22 @@ def run_monitor_mode(watchlist_name="my", analysis_mode="fast", prompt_version="
         ai_semaphore.acquire()
         try:
             t0 = time.time()
+            # --- 基金/ETF 分支：直接生成体检报告，跳过 AI 深度分析 ---
+            if data.get('_is_fund'):
+                from analyst_fund import FundAnalyst
+                report = FundAnalyst().get_report_context(data)
+                health_score = data.get('portfolio_health_score')
+                if health_score is not None:
+                    report += f"\n- **重仓股实时平均健康分**: {health_score}/10"
+                if data.get('portfolio_pe'):
+                    report += f"\n- **重仓股加权隐含 PE-TTM**: {data.get('portfolio_pe'):.2f}"
+                if data.get('portfolio_pb'):
+                    report += f"\n- **重仓股加权隐含 PB**: {data.get('portfolio_pb'):.2f}"
+                with ai_lock:
+                    ai_done[0] += 1
+                    print(f"  [✓ 完成 {ai_done[0]}/{ai_total}] 📦 {stock['name']} (基金体检, {time.time()-t0:.1f}s)")
+                return report, "📦 基金穿透报告"
+            # --- 普通股票分支 ---
             if use_deep and brain:
                 result = brain.deep_analyze_stock(data), "🧠 深度分析"
             else:
@@ -408,7 +455,11 @@ def run_monitor_mode(watchlist_name="my", analysis_mode="fast", prompt_version="
         if code in ai_results:
             stock, data, summary, label = ai_results[code]
             print(f"\n[{label}] {stock['name']} ({code})")
-            report_content += f"## {stock['name']} ({code})\n\n**分析模式**: {label}\n- **趋势**: {data['tech_summary']}\n- **资金**: {data['money_summary']}\n- **舆情**: {data['news_summary']}\n\n**AI点评**:\n\n{summary}\n\n---\n\n"
+            if data.get('_is_fund'):
+                # 基金体检报告：直接嵌入穿透式摘要，不附 AI 点评
+                report_content += f"## 📦 {stock['name']} ({code})\n\n**分析模式**: {label}\n\n{summary}\n\n---\n\n"
+            else:
+                report_content += f"## {stock['name']} ({code})\n\n**分析模式**: {label}\n- **趋势**: {data['tech_summary']}\n- **资金**: {data['money_summary']}\n- **舆情**: {data['news_summary']}\n\n**AI点评**:\n\n{summary}\n\n---\n\n"
 
     report_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Report", now.strftime('%y%m%d'))
     os.makedirs(report_dir, exist_ok=True)
@@ -665,23 +716,42 @@ if __name__ == "__main__":
         sys.exit(0)
 
     if args.valuation:
-        code, name, market = smart_stock_query(args.valuation)
+        code, name, market, asset_type = smart_stock_query(args.valuation)
         if code:
-            va = ValuationAnalyzer()
-            metrics, summary = va.analyze(code, name, market=market)
-            print(summary)
+            if asset_type in ['fund', 'etf']:
+                print(f"\n{'='*60}\n📊 {asset_type.upper()}快速分析: {name} ({code})\n{'='*60}")
+                from analyst_integration import fetch_integrated_data, build_enhanced_prompt
+                data = fetch_integrated_data(code, name, asset_type=asset_type, use_cache=False)
+                from analyst_fund import FundAnalyst
+                summary = FundAnalyst().get_report_context(data)
+                
+                health_score = data.get('portfolio_health_score')
+                if health_score is not None:
+                    summary += f"\n- **重仓股实时平均健康分**: {health_score}/10"
+                if data.get('portfolio_pe'):
+                    summary += f"\n- **重仓股加权隐含 PE-TTM**: {data.get('portfolio_pe'):.2f}"
+                if data.get('portfolio_pb'):
+                    summary += f"\n- **重仓股加权隐含 PB**: {data.get('portfolio_pb'):.2f}"
+                
+                print(summary)
+                
+                from analyst_integration import build_enhanced_prompt
+                ai_prompt = build_enhanced_prompt(data, analysis_type="worker")
+            else:
+                va = ValuationAnalyzer()
+                metrics, summary = va.analyze(code, name, market=market)
+                print(summary)
+                ai_prompt = va.generate_llm_prompt(metrics)
 
-            # 保存估值摘要报告
             now = datetime.now()
             report_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Report", now.strftime('%y%m%d'))
             os.makedirs(report_dir, exist_ok=True)
             filename = os.path.join(report_dir, f"{now.strftime('%H%M%S')}_{name}_估值分析.md")
             ai_section = ""
 
-            # 修改为9秒超时，默认自动开始 (y)
             prompt_msg = "\n🤔 是否启动AI深度分析？(9秒内未响应将自动开始) [Y/n]: "
             if ask_user_with_timeout(prompt_msg, 9, default='y') in ['y', 'yes']:
-                ai_result = call_ai(va.generate_llm_prompt(metrics))
+                ai_result = call_ai(ai_prompt)
                 print(ai_result)
                 ai_section = f"\n## AI深度分析\n\n{ai_result}\n"
 

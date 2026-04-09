@@ -193,10 +193,52 @@ def fetch_kline_data(asset_type, clean_symbol, start_date, end_date):
     if asset_type == 'etf':
         return ak.fund_etf_hist_em(symbol=clean_symbol, period="daily", start_date=start_date.strftime("%Y%m%d"), end_date=end_date.strftime("%Y%m%d"), adjust="qfq")
 
-    # 3. 个股：多源容错
+    # 3. 个股：多源容错分流
     start_str = start_date.strftime("%Y%m%d")
     end_str = end_date.strftime("%Y%m%d")
     sina_symbol = _to_sina_symbol(clean_symbol)
+
+    # 判断是否为港股
+    is_hk = (len(clean_symbol) == 5 and clean_symbol.isdigit()) or clean_symbol.endswith('.HK')
+    if is_hk:
+        hk_code = clean_symbol.replace('.HK', '')
+        # 策略1: 东财 (可能受梯子影响)
+        try:
+            df = ak.stock_hk_hist(symbol=hk_code, period="daily", start_date=start_str, end_date=end_str, adjust="qfq")
+            if df is not None and not df.empty:
+                df = _normalize_kline_columns(df)
+                logging.info(f"✓ K线数据(港股东财): {len(df)}条")
+                return df
+        except Exception as e:
+            logging.debug(f"K线(港股东财)失败: {type(e).__name__}: {str(e)[:80]}")
+            
+        # 策略2: 新浪作备用 (无复权参数但能解决阻断)
+        try:
+            df = ak.stock_hk_daily(symbol=hk_code)
+            if df is not None and not df.empty:
+                df = _normalize_kline_columns(df)
+                df = df[(df['日期'] >= pd.to_datetime(start_str)) & (df['日期'] <= pd.to_datetime(end_str))]
+                logging.info(f"✓ K线数据(港股新浪): {len(df)}条")
+                return df
+        except Exception as e:
+            logging.debug(f"K线(港股新浪)失败: {type(e).__name__}: {str(e)[:80]}")
+
+        raise ConnectionError(f"港股K线获取失败: {clean_symbol}")
+
+    # 判断是否为美股
+    is_us = clean_symbol.isalpha() or ('.' in clean_symbol and clean_symbol.replace('.', '').isalpha())
+    if is_us:
+        try:
+            # 优先使用新浪美股日线接口，解决代理阻断核心问题
+            df = ak.stock_us_daily(symbol=clean_symbol)
+            if df is not None and not df.empty:
+                df = _normalize_kline_columns(df)
+                df = df[(df['日期'] >= pd.to_datetime(start_str)) & (df['日期'] <= pd.to_datetime(end_str))]
+                logging.info(f"✓ K线数据(美股新浪): {len(df)}条")
+                return df
+        except Exception as e:
+            logging.debug(f"K线(美股)失败: {type(e).__name__}: {str(e)[:80]}")
+        raise ConnectionError(f"美股K线获取失败: {clean_symbol}")
 
     # 策略1: 东财 (push2his.eastmoney.com)
     try:
@@ -245,6 +287,13 @@ def fetch_fund_flow_data(clean_symbol, market):
     Returns:
         DataFrame: 资金流向数据
     """
+    is_hk = (len(clean_symbol) == 5 and clean_symbol.isdigit()) or clean_symbol.endswith('.HK')
+    is_us = clean_symbol.isalpha() or ('.' in clean_symbol and clean_symbol.replace('.', '').isalpha())
+    
+    if is_hk or is_us:
+        # 港美股暂不支持主力资金流向实时接口，直接返回空表供上层做降级处理
+        return pd.DataFrame()
+        
     return ak.stock_individual_fund_flow(stock=clean_symbol, market=market)
 
 # === 财联社电报集成逻辑 (内聚版) ===
@@ -561,17 +610,22 @@ MACD: {data.get('macd_signal', 'N/A')}
             market = "sh" if clean_symbol.startswith(("6", "68")) else "sz"
             # 🎯 使用带重试的资金流向获取函数
             fund_flow = fetch_fund_flow_data(clean_symbol, market)
-            recent = fund_flow.tail(3)
-            total_net = recent['主力净流入-净额'].sum()
-            # 使用符合直觉的标记：流入用绿色✅（利好），流出用红色❌（利空）
-            status = "✅流入" if total_net > 0 else "❌流出"
-            amt = f"{total_net/1e8:.2f}亿" if abs(total_net) > 1e8 else f"{total_net/10000:.0f}万"
-            data['money_summary'] = f"3日主力{status} {amt}"
+            
+            if fund_flow.empty:
+                data['money_summary'] = "港股暂无资金流向" if len(clean_symbol) == 5 else "暂无资金流向"
+                data['money_context'] = "暂无资金明细"
+            else:
+                recent = fund_flow.tail(3)
+                total_net = recent['主力净流入-净额'].sum()
+                # 使用符合直觉的标记：流入用绿色✅（利好），流出用红色❌（利空）
+                status = "✅流入" if total_net > 0 else "❌流出"
+                amt = f"{total_net/1e8:.2f}亿" if abs(total_net) > 1e8 else f"{total_net/10000:.0f}万"
+                data['money_summary'] = f"3日主力{status} {amt}"
 
-            txt = ""
-            for _, r in recent.iterrows():
-                txt += f"- {str(r['日期'])[:10]}: {'流入' if r['主力净流入-净额']>0 else '流出'}\n"
-            data['money_context'] = txt
+                txt = ""
+                for _, r in recent.iterrows():
+                    txt += f"- {str(r['日期'])[:10]}: {'流入' if r['主力净流入-净额']>0 else '流出'}\n"
+                data['money_context'] = txt
         except Exception as e:
             logging.warning(f"✗ 资金流向获取失败 [{stock_name}]: {type(e).__name__}")
             data['money_summary'] = "资金缺失"
@@ -706,3 +760,25 @@ MACD: {data.get('macd_signal', 'N/A')}
         logging.warning(f"✗ {stock_name} 所有新闻源均失败")
 
     return data
+
+def _to_xq_symbol(code: str) -> str:
+    """将代码转为雪球格式 (SH600519 / SZ002594)"""
+    code = code.strip().upper()
+    if code.startswith(('SH', 'SZ')):
+        return code
+    if code.startswith('6'):
+        return f"SH{code}"
+    if code.startswith(('0', '3')):
+        return f"SZ{code}"
+    if code.startswith(('5', '1')): # 基金/ETF
+        if code.startswith('5'): return f"SH{code}"
+        return f"SZ{code}"
+    return code
+
+class BaseAnalyst:
+    """分析器基类接口"""
+    def fetch_data(self, symbol: str, name: str):
+        raise NotImplementedError
+    
+    def get_report_context(self, data: dict) -> str:
+        raise NotImplementedError

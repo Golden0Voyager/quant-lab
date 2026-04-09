@@ -52,11 +52,85 @@ def fetch_stock_data(symbol: str, stock_name: str) -> dict:
 def fetch_integrated_data(symbol: str, stock_name: str, asset_type: str = None, use_cache: bool = True) -> dict:
     """
     整合获取完整四维数据（统一入口）
+    支持资产：股票、ETF、场外基金
     """
     if asset_type is None:
         asset_type = detect_asset_type(symbol)
 
-    # 港股识别 (5位数字或HK后缀)
+    # 1. 优先检查缓存
+    if use_cache:
+        from analyst_cache import fetch_full_stock_data_cached
+        try:
+            return fetch_full_stock_data_cached(symbol, stock_name, asset_type)
+        except Exception as e:
+            logger.warning(f"⚠️ 缓存加载失败: {e}")
+
+    # 2. 基金/ETF 专项处理管线 (另起炉灶)
+    if asset_type in ['etf', 'fund']:
+        from analyst_fund import FundAnalyst
+        analyst = FundAnalyst()
+        data = analyst.fetch_data(symbol, stock_name)
+        
+        # [核心增强] 持仓穿透递归研判
+        if data.get('portfolio'):
+            holdings = data['portfolio']
+            print(f"🔍 启动底层持仓穿透研判 (Top {len(holdings)})...")
+            from concurrent.futures import ThreadPoolExecutor
+            def get_stock_health(stock):
+                try:
+                    from analyst_base import fetch_stock_data as fetch_base
+                    from valuation_analyzer import ValuationAnalyzer
+                    
+                    s_data = fetch_base(stock['code'], stock['name'])
+                    
+                    # 取估值数据
+                    va = ValuationAnalyzer()
+                    val_data = va.fetch_current_valuation(stock['code'], stock['name'])
+                    pe = val_data.get('pe_ttm') if val_data else None
+                    pb = val_data.get('pb') if val_data else None
+                    
+                    return {
+                        'code': stock['code'],
+                        'name': stock['name'],
+                        'ratio': stock.get('ratio', 0),
+                        'status': s_data.get('ma_alignment', '数据不足'),
+                        'score': 10 if '多头排列' in s_data.get('ma_alignment', '') else (5 if '纠缠' in s_data.get('ma_alignment', '') else 0),
+                        'pe': float(pe) if pe else None,
+                        'pb': float(pb) if pb else None
+                    }
+                except Exception as e:
+                    print(f"  [X] {stock['name']} 穿透失败: {e}")
+                    return None
+
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                results = list(executor.map(get_stock_health, holdings))
+
+            valid_results = [r for r in results if r]
+            if valid_results:
+                avg_score = sum(r['score'] for r in valid_results) / len(valid_results)
+                data['portfolio_health_score'] = round(avg_score, 1)
+                data['portfolio_details'] = valid_results
+                
+                # 计算隐含加权 PE/PB
+                valid_pe_results = [r for r in valid_results if r.get('pe') and r.get('ratio')]
+                if valid_pe_results:
+                    total_ratio = sum(r['ratio'] for r in valid_pe_results)
+                    # ratio是百分点，例如 8.5 表示 8.5%
+                    weighted_pe = sum(r['pe'] * r['ratio'] for r in valid_pe_results) / total_ratio
+                    data['portfolio_pe'] = round(weighted_pe, 2)
+                    
+                valid_pb_results = [r for r in valid_results if r.get('pb') and r.get('ratio')]
+                if valid_pb_results:
+                    total_ratio = sum(r['ratio'] for r in valid_pb_results)
+                    weighted_pb = sum(r['pb'] * r['ratio'] for r in valid_pb_results) / total_ratio
+                    data['portfolio_pb'] = round(weighted_pb, 2)
+                    
+                print(f"✅ 持仓穿透完成，平均健康分: {avg_score:.1f}")
+                if 'portfolio_pe' in data:
+                    print(f"   --> 加权隐含 PE-TTM: {data['portfolio_pe']:.2f}, PB: {data.get('portfolio_pb', 0):.2f}")
+        return data
+
+    # 3. 港股识别 (5位数字或HK后缀)
     is_hk = (len(symbol) == 5 and symbol.isdigit()) or symbol.endswith('.HK')
 
     if use_cache:
@@ -581,18 +655,48 @@ def evaluate_enhanced_signals(data: dict) -> tuple:
 def build_enhanced_prompt(data: dict, analysis_type: str = "worker", prompt_version: str = "professional") -> str:
     """
     构建增强版prompt，包含四维数据
-
-    Args:
-        data: 完整数据
-        analysis_type: 分析类型 ("worker" 或 "brain")
-        prompt_version: Prompt版本 ("value_first" / "quant_hybrid" / "professional")
-
-    Returns:
-        完整的prompt字符串
+    支持：股票、ETF、场外基金
     """
     stock_name = data.get('name', 'N/A')
     stock_code = data.get('code', 'N/A')
     asset_type = data.get('type', 'stock')
+
+    # 1. 基金/ETF 专项 Prompt (Pro Edition)
+    if asset_type in ['etf', 'fund']:
+        from analyst_fund import FundAnalyst
+        fund_context = FundAnalyst().get_report_context(data)
+        
+        # 注入持仓健康度
+        health_score = data.get('portfolio_health_score', 'N/A')
+        health_details = data.get('portfolio_details', [])
+        health_str = f"#### 5. 持仓实时穿透评估 (Live Health & Valuation)\n- **底层股票平均健康分**: {health_score}/10\n"
+        
+        pe_str = data.get('portfolio_pe')
+        pb_str = data.get('portfolio_pb')
+        if pe_str:
+            health_str += f"- **重仓股加权隐含 PE-TTM**: {pe_str:.2f}\n"
+        if pb_str:
+            health_str += f"- **重仓股加权隐含 PB**: {pb_str:.2f}\n"
+            
+        health_str += "- **趋势状态**:\n"
+        for h in health_details[:5]:
+            health_str += f"  - {h['code']}: [{h['status']}] (PE:{h.get('pe', 'N/A')}, PB:{h.get('pb', 'N/A')})\n"
+            
+        prompt = f"""
+你是一位顶级的基金量化研究员。请对以下基金进行深度研判。
+
+{fund_context}
+
+{health_str}
+
+## 分析要求
+1. **估值与健康度研判**：结合底层股票的隐含加权 PE/PB 和实时健康分，判断基金当前的估值处于泡沫期还是击球区。
+2. **风险收益评估**：结合夏普比率和最大回撤，分析经理的风险定价能力。
+3. **投资建议**：给出明确的配置建议（超买入/定投/观望/减仓）。
+
+请保持专业、客观，字数在 800 字左右。
+"""
+        return prompt
 
     if analysis_type == "worker":
         # Worker层：快速分析（qwen-flash）— 按优先级排序
