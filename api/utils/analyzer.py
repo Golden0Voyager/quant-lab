@@ -78,7 +78,7 @@ class StockAnalyzer:
 
         # 尝试通过代码查询名称
         try:
-            resolved_code, resolved_name, market = smart_stock_query(code)
+            resolved_code, resolved_name, market, asset_type = smart_stock_query(code)
             if resolved_code:
                 return resolved_code, resolved_name, market or 'A'
         except Exception as e:
