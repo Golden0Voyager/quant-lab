@@ -225,8 +225,8 @@ def fetch_kline_data(asset_type, clean_symbol, start_date, end_date):
 
         raise ConnectionError(f"港股K线获取失败: {clean_symbol}")
 
-    # 判断是否为美股
-    is_us = clean_symbol.isalpha() or ('.' in clean_symbol and clean_symbol.replace('.', '').isalpha())
+    # 判断是否为美股（仅ASCII字母，排除中文等非拉丁字符）
+    is_us = clean_symbol.isascii() and (clean_symbol.isalpha() or ('.' in clean_symbol and clean_symbol.replace('.', '').isalpha()))
     if is_us:
         try:
             # 优先使用新浪美股日线接口，解决代理阻断核心问题

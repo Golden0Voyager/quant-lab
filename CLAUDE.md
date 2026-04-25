@@ -31,7 +31,7 @@ python main.py --batch-valuation "stock1,stock2" --yes
 ## 网络配置
 
 - `ai_config.init_global_network()` 对所有 requests.Session 设置 `trust_env=False`
-- Yahoo Finance：线程本地代理注入 `_yahoo_proxy`（Clash 127.0.0.1:8118）
+- Yahoo Finance：线程本地代理注入 `_yahoo_proxy`（Clash 127.0.0.1:7897）
 - 东财等国内 API：直连（不需代理）
 - 东财 IPv6 不可靠 → 通过 `socket.getaddrinfo` monkey-patch 强制 IPv4
 

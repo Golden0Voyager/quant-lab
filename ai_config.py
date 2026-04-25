@@ -12,7 +12,7 @@ from openai import OpenAI
 _yahoo_proxy = threading.local()
 
 # 默认代理地址（仅用于 Yahoo Finance，国内 API 全部直连）
-YAHOO_PROXY_URL = os.getenv("YAHOO_PROXY", "http://127.0.0.1:8118")
+YAHOO_PROXY_URL = os.getenv("YAHOO_PROXY", "http://127.0.0.1:7897")
 
 # ==================== 全局网络配置优化 ====================
 

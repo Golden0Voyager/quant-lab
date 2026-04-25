@@ -85,7 +85,7 @@ def load_watchlists():
             for key in ['my', 'dad', 'erin']:
                 if key in config and 'stocks' in config[key]:
                     watchlists[key] = [
-                        {"code": stock["code"], "name": stock["name"]}
+                        {"code": stock["code"], "name": stock["name"], "tags": stock.get("tags", [])}
                         for stock in config[key]["stocks"]
                     ]
                 else:
@@ -254,8 +254,9 @@ def run_global_stock_mode(ticker):
 
 def run_single_stock_mode(stock_code, stock_name=None, analysis_mode="auto", prompt_version="professional"):
     market = 'A'
+    resolved_asset_type = None
     if stock_name is None or not stock_code.isdigit():
-        resolved_code, resolved_name, resolved_market, asset_type = smart_stock_query(stock_code)
+        resolved_code, resolved_name, resolved_market, resolved_asset_type = smart_stock_query(stock_code)
         if resolved_code is None: return
         stock_code, stock_name, market = resolved_code, resolved_name, resolved_market or 'A'
 
@@ -264,6 +265,31 @@ def run_single_stock_mode(stock_code, stock_name=None, analysis_mode="auto", pro
         va = ValuationAnalyzer()
         metrics, summary = va.analyze(stock_code, stock_name, market='HK')
         print(summary)
+        return
+
+    # 场外基金走专属分析路径
+    if resolved_asset_type == 'fund':
+        stock_name = stock_name or stock_code
+        print(f"\n{'='*60}\n🔍 基金查询模式\n📅 日期: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n🎯 标的: {stock_name} ({stock_code})\n{'='*60}\n")
+        try:
+            from analyst_fund import FundAnalyst
+            fa = FundAnalyst()
+            data = fa.fetch_data(stock_code, stock_name)
+            report = fa.get_report_context(data)
+            print(report)
+
+            now = datetime.now()
+            report_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Report", now.strftime('%y%m%d'))
+            os.makedirs(report_dir, exist_ok=True)
+            filename = os.path.join(report_dir, f"{now.strftime('%H%M%S')}_{stock_name}_fund.md")
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write(f"# {stock_name}（{stock_code}）基金穿透报告\n\n> 生成时间: {now.strftime('%Y-%m-%d %H:%M:%S')}\n\n{report}\n")
+            print(f"✅ Markdown报告已保存: {filename}")
+            pdf_path = filename.replace('.md', '.pdf')
+            if md_to_pdf(filename, pdf_path):
+                print(f"✅ PDF报告已生成: {pdf_path}")
+        except Exception as e:
+            logging.error(f"❌ 基金分析失败: {e}")
         return
 
     stock_name = stock_name or stock_code
@@ -318,15 +344,16 @@ def run_single_stock_mode(stock_code, stock_name=None, analysis_mode="auto", pro
 # 自选股统一数据调度（股票 / ETF / 基金）
 # ============================================================
 
-def fetch_watchlist_item_data(code: str, name: str) -> dict:
+def fetch_watchlist_item_data(code: str, name: str, asset_type: str = None) -> dict:
     """
     统一的自选股数据调度函数。
     根据资产类型自动选择数据获取路径：
-      - ETF / 场外基金 → FundAnalyst（穿透持仓）
+      - ETF / 场外基金 �� FundAnalyst（穿透持仓）
       - A股 → 四维数据集成管线（技术+资金+舆情+估值）
     返回的 dict 中包含 'asset_type' 字段标识类型。
     """
-    asset_type = detect_asset_type(code)
+    if asset_type is None:
+        asset_type = detect_asset_type(code)
     if asset_type in ('etf', 'fund'):
         data = fetch_integrated_data(code, name, asset_type=asset_type, use_cache=True)
         data['asset_type'] = asset_type
@@ -356,7 +383,13 @@ def run_monitor_mode(watchlist_name="my", analysis_mode="fast", prompt_version="
 
     with ThreadPoolExecutor(max_workers=3) as executor:
         # 使用统一调度函数，自动识别并分流基金 / ETF / 股票
-        futures = {executor.submit(fetch_watchlist_item_data, s['code'], s['name']): s for s in watchlist}
+        # 从 tags 推断 asset_type: 含"基金"标签的走 fund 路径
+        def _infer_asset_type(item):
+            tags = [t.lower() for t in item.get('tags', [])]
+            if '基金' in tags or 'fund' in tags:
+                return 'fund'
+            return None  # 让 fetch_watchlist_item_data 内部用 detect_asset_type
+        futures = {executor.submit(fetch_watchlist_item_data, s['code'], s['name'], _infer_asset_type(s)): s for s in watchlist}
         for future in as_completed(futures):
             stock = futures[future]
             try:

@@ -154,12 +154,17 @@ class StockFinder:
                     os.environ.update(env_copy)
                     return
             except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"⚠️  获取ETF列表失败，{2*(attempt+1)}秒后重试: {e}")
+                else:
+                    print(f"⚠️  获取ETF列表失败（已重试{max_retries}次）: {e}")
                 time.sleep(2 * (attempt + 1))
-        
+
         # 恢复环境变量
         os.environ.clear()
         os.environ.update(env_copy)
-        self.etf_list = []
+        # 尝试加载过期缓存
+        self._load_expired_list_cache(self.etf_cache_file, 'etf_list', 'ETF')
 
     def _load_or_fetch_fund_list(self):
         """加载或获取场外基金列表"""
@@ -200,11 +205,16 @@ class StockFinder:
                 os.environ.update(env_copy)
                 return
             except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"⚠️  获取基金列表失败，{2*(attempt+1)}秒后重试: {e}")
+                else:
+                    print(f"⚠️  获取基金列表失败（已重试{max_retries}次）: {e}")
                 time.sleep(2 * (attempt + 1))
-        
+
         os.environ.clear()
         os.environ.update(env_copy)
-        self.fund_list = []
+        # 尝试加载过期缓存
+        self._load_expired_list_cache(self.fund_cache_file, 'fund_list', '场外基金')
 
     def _load_or_fetch_hk_stock_list(self):
         """加载或获取港股列表"""
@@ -276,6 +286,20 @@ class StockFinder:
                     print(f"⚠️  获取港股列表失败: {e}")
                     self._load_expired_hk_cache()
 
+    def _load_expired_list_cache(self, cache_file, attr_name, label):
+        """通用的过期缓存加载（网络失败时的兜底）"""
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    cache_data = json.load(f)
+                    setattr(self, attr_name, cache_data['data'])
+                    cache_date = datetime.fromisoformat(cache_data['date'])
+                    print(f"📋 已加载{label}备用缓存（{len(cache_data['data'])}只，更新于{cache_date.strftime('%Y-%m-%d')}）")
+                    return
+            except Exception:
+                pass
+        setattr(self, attr_name, [])
+
     def _load_expired_hk_cache(self):
         """加载过期的港股缓存作为备用"""
         if os.path.exists(self.hk_cache_file):
@@ -340,9 +364,10 @@ class StockFinder:
             search_list.extend(self.fund_list)
 
         # --- 2. 精确匹配策略 ---
-        # 代码精确匹配 (针对基金代码 6位数字)
+        # 代码精确匹配 (港股5位，A股/ETF/基金6位)
         for item in search_list:
-            if item['code'] == query or item['code'] == query.zfill(6 if item['asset_type']=='fund' else 5):
+            pad_len = 5 if item.get('market') == 'HK' else 6
+            if item['code'] == query or item['code'] == query.zfill(pad_len):
                 return item
 
         # 名称精确匹配
@@ -402,8 +427,8 @@ def smart_stock_query(query):
     """
     finder = StockFinder()
     
-    # 检测是否为美股代码（纯字母，或带.的纯字母如 BRK.B）
-    is_us = query.isalpha() or ('.' in query and query.replace('.', '').isalpha())
+    # 检测是否为美股代码（纯ASCII字母，或带.的纯ASCII字母如 BRK.B）
+    is_us = query.isascii() and (query.isalpha() or ('.' in query and query.replace('.', '').isalpha()))
     if is_us:
         print(f"✅ 探测到: [美股代码] {query}")
         return query, query, 'US', 'stock'

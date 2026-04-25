@@ -34,7 +34,7 @@ class FundAnalyst(BaseAnalyst):
             fund_info = ak.fund_open_fund_info_em(symbol=symbol, indicator="单位净值走势")
             if not fund_info.empty:
                 data['basic'] = {"info": "开放式基金"}
-        except:
+        except Exception:
             data['basic'] = {"info": "基础信息暂不可用"}
 
         # 2. 历史净值获取 (雪球通用接口 + 东财备用)
@@ -73,7 +73,7 @@ class FundAnalyst(BaseAnalyst):
                 df = df.rename(columns={'净值日期': 'date', '单位净值': '收盘'})
                 df['date'] = pd.to_datetime(df['date'])
                 return df
-        except:
+        except Exception:
             pass
         return None
 
@@ -111,7 +111,7 @@ class FundAnalyst(BaseAnalyst):
                 'calmar_ratio': round(calmar, 2),
                 'status': 'Normal'
             }
-        except:
+        except Exception:
             return {'status': 'Calculation Failed'}
 
     def _fetch_portfolio_penetration(self, symbol: str):
@@ -128,7 +128,7 @@ class FundAnalyst(BaseAnalyst):
                     ratio_val = row.get('占净值比例', row.get('持仓比例', row.get('持股比例', 0)))
                     try:
                         ratio_val = float(ratio_val)
-                    except:
+                    except (ValueError, TypeError):
                         ratio_val = 0.0
 
                     holdings.append({
@@ -138,7 +138,7 @@ class FundAnalyst(BaseAnalyst):
                         'change': row.get('持股变动', '持平')
                     })
                 return holdings
-        except:
+        except Exception:
             pass
         return []
 
@@ -157,7 +157,7 @@ class FundAnalyst(BaseAnalyst):
                             'rank': f"{row['同类排名'].values[0]}"
                         }
                 return perf
-        except:
+        except Exception:
             pass
         return {}
 
