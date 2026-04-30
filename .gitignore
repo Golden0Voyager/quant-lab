@@ -61,3 +61,8 @@ watchlists.json
 # 临时文件
 *.tmp
 *.bak
+
+# AI 工具本地配置
+.claude/settings.local.json
+.gemini/
+.pdca-status.json

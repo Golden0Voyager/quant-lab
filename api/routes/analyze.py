@@ -11,11 +11,32 @@ import os
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
+import os
+import httpx
+
+# ... (保持不变)
+
 from api.utils.analyzer import StockAnalyzer
 from api.utils.validators import validate_stock_code, validate_analysis_mode
 
 bp = Blueprint('analyze', __name__)
 logger = logging.getLogger(__name__)
+
+def sync_to_wiki(topic: str, content: str, metadata: dict):
+    """同步到 agent_platform 的 WikiAgent (Background Sync)"""
+    try:
+        url = "http://localhost:8000/api/v1/wiki/ingest"
+        payload = {
+            "source_project": "quant_lab",
+            "topic": topic,
+            "content": content,
+            "metadata": metadata
+        }
+        # 简单同步调用，生产环境建议用 Celery 等异步任务
+        with httpx.Client() as client:
+            client.post(url, json=payload, timeout=5.0)
+    except Exception as e:
+        logger.warning(f"Wiki sync failed: {e}")
 
 # 初始化分析器
 analyzer = StockAnalyzer()
@@ -144,6 +165,9 @@ def analyze_deep():
         # 执行深度分析
         logger.info(f"Deep analysis requested for {stock_code} with {prompt_version}")
         result = analyzer.analyze_deep(stock_code, stock_name, prompt_version)
+        
+        # 同步至 WikiAgent
+        sync_to_wiki(topic=f"个股深度分析_{stock_code}", content=result.get("report_markdown", ""), metadata={"stock_code": stock_code, "mode": "deep"})
 
         return jsonify({
             'success': True,
@@ -206,6 +230,9 @@ def analyze_multi_strategy():
         # 执行多策略分析
         logger.info(f"Multi-strategy analysis requested for {stock_code}")
         result = analyzer.analyze_multi_strategy(stock_code, stock_name)
+        
+        # 同步至 WikiAgent
+        sync_to_wiki(topic=f"个股多策略对比_{stock_code}", content=result.get("comparison_report", ""), metadata={"stock_code": stock_code, "mode": "multi-strategy"})
 
         return jsonify({
             'success': True,
