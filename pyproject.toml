@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "akshare>=1.17.94",
+    "anthropic>=0.49.0",
     "ddgs>=9.9.3",
     "markdown>=3.7",
     "matplotlib>=3.10.8",
@@ -17,5 +18,30 @@ dependencies = [
     "openpyxl>=3.1.5",
     "pandas>=2.3.3",
     "playwright>=1.49.0",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "questionary>=2.0",
     "watchdog>=6.0.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.7.0",
+    "mypy>=1.13.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+files = ["quant_lab/core/"]
