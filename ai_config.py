@@ -1,7 +1,9 @@
-import os
 import logging
+import os
 import socket
 import threading
+import warnings
+
 import httpx
 from openai import OpenAI
 
@@ -76,7 +78,8 @@ def init_global_network():
         logging.warning(f"⚠️ 全局网络优化失败: {e}")
 
 
-# ==================== 全局 AI 配置中心 ====================
+# ==================== 全局 AI 配置中心 (DEPRECATED) ====================
+# 以下函数和变量已被 quant_lab.core.llm 模块取代，保留仅用于向后兼容。
 
 # 支持的模型配置列表
 MODEL_CONFIGS = {
@@ -118,16 +121,34 @@ ACTIVE_PROFILE = "deepseek"
 
 def get_current_config():
     """获取当前激活的完整配置字典"""
+    warnings.warn(
+        "ai_config.get_current_config is deprecated. "
+        "Use quant_lab.core.llm.catalog.ModelCatalog instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return MODEL_CONFIGS.get(ACTIVE_PROFILE, MODEL_CONFIGS["deepseek"])
 
 
 def get_primary_model_name():
     """获取当前主力模型名称"""
+    warnings.warn(
+        "ai_config.get_primary_model_name is deprecated. "
+        "Use quant_lab.core.llm.factory.create_client instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return get_current_config()["model"]
 
 
 def get_backup_model_name():
     """获取当前备用模型名称"""
+    warnings.warn(
+        "ai_config.get_backup_model_name is deprecated. "
+        "Use quant_lab.core.llm.factory.create_client instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     config = get_current_config()
     # 优先使用配置中的 backup_model，如果没有则硬编码一个保底
     return config.get("backup_model", "glm-4.7")
@@ -137,12 +158,15 @@ def create_openai_client(timeout=180.0):
     """
     创建一个统一配置的 OpenAI Client
 
-    Args:
-        timeout: 超时时间（秒）
-
-    Returns:
-        OpenAI: 初始化好的客户端
+    .. deprecated::
+        已弃用，请使用 ``quant_lab.core.llm.factory.create_client``。
     """
+    warnings.warn(
+        "ai_config.create_openai_client is deprecated. "
+        "Use quant_lab.core.llm.factory.create_client instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     config = get_current_config()
     api_key = os.getenv(config["api_key_env"])
 
