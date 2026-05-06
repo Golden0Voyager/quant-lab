@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, cast
 
 from pydantic import BaseModel
+
+from .base import LLMClient
 
 logger = logging.getLogger(__name__)
 
 
 def invoke_structured_or_freetext[T: BaseModel](
-    client: Any,
+    client: LLMClient,
     prompt: str,
     schema: type[T],
     *,
@@ -21,8 +22,7 @@ def invoke_structured_or_freetext[T: BaseModel](
     """尝试以 structured-output 模式调用 LLM；失败时降级为自由文本.
 
     Args:
-        client: 已初始化的 LLM 客户端 (需支持 ``client.beta.chat.completions.parse`` 或
-            通过 ``client.chat.completions.create(response_format=...)`` 输出结构化结果).
+        client: 符合 LLMClient Protocol 的客户端实例.
         prompt: 发送给模型的 prompt.
         schema: 期望输出的 Pydantic schema 类.
         temperature: 采样温度.
@@ -31,28 +31,21 @@ def invoke_structured_or_freetext[T: BaseModel](
     Returns:
         若结构化成功返回 schema 实例；否则返回原始自由文本字符串.
     """
-    model_name: str = getattr(client, "_model", "")
-
-    # 1. 尝试 structured output (OpenAI SDK ≥ 1.8 的 parse API)
+    # 1. 尝试 structured output
     for attempt in range(1, max_retries + 1):
         try:
-            completion = client.beta.chat.completions.parse(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": "请按指定 JSON Schema 输出结果。"},
-                    {"role": "user", "content": prompt},
-                ],
-                response_format=schema,
+            result = client.chat(
+                prompt,
+                schema=schema,
                 temperature=temperature,
             )
-            parsed = cast(T | None, completion.choices[0].message.parsed)
-            if parsed is not None:
+            if isinstance(result, schema):
                 logger.debug(
                     "Structured output succeeded for %s on attempt %d",
                     schema.__name__,
                     attempt,
                 )
-                return parsed
+                return result
         except Exception as exc:
             logger.warning(
                 "Structured output failed for %s (attempt %d/%d): %s",
@@ -69,19 +62,7 @@ def invoke_structured_or_freetext[T: BaseModel](
         max_retries,
     )
     try:
-        completion = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一位资深量化分析师，请用自然语言输出分析结论。",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=temperature,
-        )
-        content: str = completion.choices[0].message.content or ""
-        return content
+        return client.chat(prompt, temperature=temperature)
     except Exception as exc:
         logger.error("Free-text fallback also failed: %s", type(exc).__name__)
         raise
