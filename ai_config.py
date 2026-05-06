@@ -1,6 +1,5 @@
 import logging
 import os
-import socket
 import threading
 import warnings
 
@@ -16,63 +15,36 @@ _yahoo_proxy = threading.local()
 # 默认代理地址（仅用于 Yahoo Finance，国内 API 全部直连）
 YAHOO_PROXY_URL = os.getenv("YAHOO_PROXY", "http://127.0.0.1:7897")
 
-# ==================== 全局网络配置优化 ====================
+# ==================== 全局网络配置优化 (DEPRECATED) ====================
 
 
 def init_global_network():
-    """初始化全局网络设置，提升数据抓取稳定性"""
-    # 1. 压制 urllib3 连接重试的噪音日志（RemoteDisconnected 等连接级重试）
+    """初始化全局网络设置，提升数据抓取稳定性。
+
+    .. deprecated::
+        已弃用。新代码请显式使用 ``quant_lab.core.net`` 中的
+        :func:`make_china_session` / :func:`make_yahoo_session` / :func:`make_llm_session`。
+    """
+    warnings.warn(
+        "ai_config.init_global_network() is deprecated. "
+        "Use quant_lab.core.net.make_china_session / make_yahoo_session / make_llm_session instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
+    # 1. 压制 urllib3 连接重试的噪音日志
     logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
 
-    # 2. 东方财富域名强制使用 IPv4（其 IPv6 路由不稳定）
-    _original_getaddrinfo = socket.getaddrinfo
+    # 2. 东方财富 IPv4 强制
+    from quant_lab.core.net.dns import force_ipv4_eastmoney
 
-    def _prefer_ipv4(host, port, family=0, type=0, proto=0, flags=0):
-        if host and isinstance(host, str) and "eastmoney.com" in host:
-            return _original_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
-        return _original_getaddrinfo(host, port, family, type, proto, flags)
+    force_ipv4_eastmoney()
 
-    socket.getaddrinfo = _prefer_ipv4
-
-    # 3. Monkey-patch requests：User-Agent / 重试 / 东方财富绕过代理
+    # 3. Monkey-patch requests（兼容老代码路径）
     try:
-        import requests
-        from requests.adapters import HTTPAdapter
-        from urllib3.util.retry import Retry
+        from quant_lab.core.net.sessions import _install_patched_session_init
 
-        _original_session_init = requests.Session.__init__
-
-        def _patched_session_init(self, *args, **kwargs):
-            _original_session_init(self, *args, **kwargs)
-            # 国内 API 绕过系统代理（Clash 会把东财等域名误路由到海外节点）
-            self.trust_env = False
-            # 设置通用的真实浏览器 Header
-            self.headers.update(
-                {
-                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                }
-            )
-
-            # Yahoo Finance 代理注入：当 OpenBB fetch 线程设置了 _yahoo_proxy.active 时，
-            # 直接将代理写入 session.proxies（不依赖 trust_env）
-            if getattr(_yahoo_proxy, "active", False):
-                proxy_url = getattr(_yahoo_proxy, "proxy_url", YAHOO_PROXY_URL)
-                if proxy_url:
-                    self.proxies = {"http": proxy_url, "https": proxy_url}
-
-            # 添加自动重试适配器（仅重试 HTTP 状态码错误，连接级错误由上层处理）
-            retry_strategy = Retry(
-                total=2,
-                backoff_factor=1,
-                status_forcelist=[429, 500, 502, 503, 504],
-                connect=1,  # 连接错误最多重试 1 次（减少无效等待）
-                read=1,  # 读取错误最多重试 1 次
-            )
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-            self.mount("http://", adapter)
-            self.mount("https://", adapter)
-
-        requests.Session.__init__ = _patched_session_init
+        _install_patched_session_init()
         logging.info("✅ 全局网络优化已激活 (国内直连/Yahoo代理注入/重试机制)")
     except Exception as e:
         logging.warning(f"⚠️ 全局网络优化失败: {e}")
