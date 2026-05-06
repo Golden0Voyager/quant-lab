@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 from typing import Any, TypeVar, cast
 
-import httpx
 from openai import OpenAI
 from pydantic import BaseModel
+
+from quant_lab.core.net import make_llm_session
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
@@ -17,7 +18,7 @@ class OpenAICompatibleClient:
     """OpenAI 兼容 API 的通用封装.
 
     支持所有 OpenAI-compatible endpoint（ModelScope、DashScope、OpenRouter 等）。
-    通过 ``httpx.Client(trust_env=False, proxy=None)`` 显式禁用系统代理，
+    通过 ``make_llm_session()`` 创建 ``httpx.Client`` 显式禁用系统代理，
     避免 Clash 等工具把国内 API 误路由到海外节点。
     """
 
@@ -32,11 +33,7 @@ class OpenAICompatibleClient:
         self._model = model
         self._timeout = timeout
 
-        http_client = httpx.Client(
-            timeout=timeout,
-            proxy=None,
-            trust_env=False,
-        )
+        http_client = make_llm_session(timeout=timeout)
         self._client = OpenAI(
             api_key=api_key,
             base_url=base_url,
