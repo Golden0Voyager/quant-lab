@@ -206,53 +206,78 @@ def test_valuation_parity():
 
 ### 6.4 fixture JSON 格式
 
-按"源模块 → 函数名 → 返回值"两层嵌套，便于 mock_all_sources 直接消费：
+**关键约束**：legacy `fetch_<D>_data` 直接调原生 akshare 函数（如 `ak.stock_yjbb_em`），不经过 sources/ 包装层。因此 fixture 必须按**原生 akshare 函数名**键入，mock 同时拦截 v2 sources 和 legacy 的原生调用。
+
+格式：
 
 ```json
 {
-  "xueqiu": {
-    "fetch_xueqiu_spot": {
-      "市盈率(TTM)": "15.5",
-      "市净率": "1.2",
-      "股息率(TTM)": "3.5",
-      "总市值": "5000000000"
-    }
+  "stock_individual_spot_xq": {
+    "_columns": ["item", "value"],
+    "_rows": [
+      ["市盈率(TTM)", "15.5"],
+      ["市净率", "1.2"],
+      ["股息率(TTM)", "3.5"],
+      ["总市值", "5000000000"]
+    ]
   },
-  "baidu": {
-    "fetch_valuation_percentile": {
-      "10y": 45.2,
-      "5y": 50.0
-    }
+  "stock_yjbb_em": {
+    "_columns": ["股票代码", "每股收益", "每股净资产"],
+    "_rows": [["000001", "2.5", "10.0"]]
   },
-  "eastmoney": {
-    "fetch_stock_info_eastmoney": null
-  }
+  "stock_zh_a_hist": null,
+  "stock_zh_a_daily": null
 }
 ```
 
-返回值为 `null` 表示让该 source 函数返回 `None`（用于降级测试）。
+约定：
+
+- 顶层 key 是原生 akshare 函数名（不带 `ak.` 前缀）
+- 值为 `{"_columns": [...], "_rows": [...]}` 时表示返回 DataFrame
+- 值为 `null` 时表示该函数返回 `None` / 抛异常（用于降级测试）
+- 非 DataFrame 返回值（如 dict）原样存储
+
+非 akshare 的直连 API（如百度估值分位）单独键入，由对应的 patcher 拦截 `requests.get`。
 
 ### 6.5 mock_all_sources fixture
 
-`tests/v2/data/parity/conftest.py` 提供统一上下文管理器：
+`tests/v2/data/parity/conftest.py` 提供 context manager，patch 所有相关 akshare 函数：
 
 ```python
+import akshare as ak
+import pandas as pd
+from contextlib import contextmanager
+from unittest.mock import patch
+
+def _build_return_value(spec):
+    if spec is None:
+        return None
+    if isinstance(spec, dict) and "_columns" in spec:
+        return pd.DataFrame(spec["_rows"], columns=spec["_columns"])
+    return spec
+
 @contextmanager
-def mock_all_sources(fixture: dict[str, Any]):
-    """根据 fixture 内容，patch 所有 sources/ 中的 fetch_* 函数。"""
+def mock_akshare(fixture: dict[str, Any]):
+    """Patch akshare functions per fixture, covering both v2 sources and legacy."""
     patches = []
-    for source_module, calls in fixture.items():
-        for func_name, return_value in calls.items():
-            patcher = patch(f"quant_lab.core.data.sources.{source_module}.{func_name}",
-                           return_value=return_value)
-            patches.append(patcher)
-            patcher.start()
+    for func_name, spec in fixture.items():
+        if not hasattr(ak, func_name):
+            continue
+        return_value = _build_return_value(spec)
+        if spec is None:
+            patcher = patch.object(ak, func_name, side_effect=Exception("mocked None"))
+        else:
+            patcher = patch.object(ak, func_name, return_value=return_value)
+        patches.append(patcher)
+        patcher.start()
     try:
         yield
     finally:
         for p in patches:
             p.stop()
 ```
+
+由于 v2 sources 和 legacy `analyst_data` 都通过 `import akshare as ak` 引用，`patch.object(ak, "stock_yjbb_em")` 同时生效于两端。
 
 ## 7. 集成（Step 8-9）
 
