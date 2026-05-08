@@ -26,10 +26,9 @@ class TestPreferIpv4ForHost:
 
     def test_restores_on_exception(self) -> None:
         original = socket.getaddrinfo
-        with pytest.raises(RuntimeError):
-            with prefer_ipv4_for_host("example.com"):
-                assert socket.getaddrinfo is not original
-                raise RuntimeError("boom")
+        with pytest.raises(RuntimeError), prefer_ipv4_for_host("example.com"):
+            assert socket.getaddrinfo is not original
+            raise RuntimeError("boom")
         assert socket.getaddrinfo is original
 
 
