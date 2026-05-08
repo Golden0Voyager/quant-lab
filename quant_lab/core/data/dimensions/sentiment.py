@@ -10,7 +10,8 @@ import akshare as ak  # type: ignore[import-untyped]
 
 from quant_lab.core.data.dimensions.base import safe_fetch
 from quant_lab.core.data.sources._utils import no_proxy, safe_float
-from quant_lab.core.data.sources.akshare_ import fetch_stock_info_eastmoney, fetch_xueqiu_spot
+from quant_lab.core.data.sources.eastmoney import fetch_stock_info_eastmoney
+from quant_lab.core.data.sources.xueqiu import fetch_xueqiu_spot
 
 logger = logging.getLogger(__name__)
 
