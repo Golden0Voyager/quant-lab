@@ -121,9 +121,10 @@ def _install_patched_session_init() -> None:
     This is a private compatibility helper kept for ``ai_config.init_global_network()``.
     New code should use :func:`make_china_session` or :func:`make_yahoo_session` directly.
     """
-    import ai_config  # type: ignore[import-not-found]
     import requests  # type: ignore[import-untyped]
     from requests.adapters import HTTPAdapter  # type: ignore[import-untyped]
+
+    import ai_config  # type: ignore[import-not-found]
 
     _original_session_init = requests.Session.__init__
 
