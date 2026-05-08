@@ -7,14 +7,14 @@ from typing import Any
 
 from quant_lab.core.data.dimensions.base import safe_fetch
 from quant_lab.core.data.sources._utils import safe_float
-from quant_lab.core.data.sources.akshare_ import (
+from quant_lab.core.data.sources.baidu import fetch_valuation_percentile
+from quant_lab.core.data.sources.eastmoney import (
     fetch_eastmoney_kline,
     fetch_financial_report,
-    fetch_sina_kline,
     fetch_stock_info_eastmoney,
-    fetch_xueqiu_spot,
 )
-from quant_lab.core.data.sources.baidu import fetch_valuation_percentile
+from quant_lab.core.data.sources.sina import fetch_sina_kline
+from quant_lab.core.data.sources.xueqiu import fetch_xueqiu_spot
 
 logger = logging.getLogger(__name__)
 
