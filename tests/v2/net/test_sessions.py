@@ -6,7 +6,6 @@ import os
 from unittest.mock import MagicMock, patch
 
 import httpx
-import pytest
 
 from quant_lab.core.net.sessions import (
     make_china_session,
