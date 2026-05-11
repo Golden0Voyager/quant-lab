@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Any, cast
 
 import akshare as ak  # type: ignore[import-untyped]
 import pandas as pd  # type: ignore[import-untyped]
 
+from quant_lab.core.data.dimensions._utils import get_report_date
 from quant_lab.core.data.dimensions.base import safe_fetch
 from quant_lab.core.data.sources._utils import no_proxy
 
@@ -19,25 +19,12 @@ _industry_cache: dict[str, str | None] = {}
 _yjbb_cache: dict[str, Any] = {}
 
 
-def _get_report_date() -> str:
-    """Return the most recently available report date string (YYYYMMDD)."""
-    now = datetime.now()
-    year, month = now.year, now.month
-    if month >= 11:
-        return f"{year}0930"
-    elif month >= 8:
-        return f"{year}0630"
-    elif month >= 5:
-        return f"{year}0331"
-    return f"{year - 1}0930"
-
-
 def _get_industry(symbol: str) -> str | None:
     """Resolve industry name for *symbol* (with cache)."""
     if symbol in _industry_cache:
         return _industry_cache[symbol]
 
-    report_date = _get_report_date()
+    report_date = get_report_date()
 
     # Strategy 1: stock_yjbb_em
     try:
@@ -89,7 +76,7 @@ class IndustryCompareFetcher:
 
         data["industry_name"] = industry
 
-        report_date = _get_report_date()
+        report_date = get_report_date()
         with no_proxy():
             df = ak.stock_yjbb_em(date=report_date)
         if df is None or df.empty:
