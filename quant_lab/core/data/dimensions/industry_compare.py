@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 import akshare as ak  # type: ignore[import-untyped]
 import pandas as pd  # type: ignore[import-untyped]
@@ -48,7 +48,7 @@ def _get_industry(symbol: str) -> str | None:
         if yjbb_df is not None and not yjbb_df.empty:
             row = yjbb_df[yjbb_df["股票代码"] == symbol]
             if not row.empty:
-                industry = row.iloc[0].get("所处行业")
+                industry = cast(str | None, row.iloc[0].get("所处行业"))
                 if industry:
                     _industry_cache[symbol] = industry
                     return industry
@@ -62,7 +62,7 @@ def _get_industry(symbol: str) -> str | None:
         if info_df is not None and not info_df.empty:
             row = info_df[info_df["item"] == "行业"]
             if not row.empty:
-                industry = row.iloc[0]["value"]
+                industry = cast(str | None, row.iloc[0]["value"])
                 if industry:
                     _industry_cache[symbol] = industry
                     return industry
