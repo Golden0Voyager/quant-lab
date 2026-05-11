@@ -6,7 +6,6 @@ import logging
 from typing import Any
 
 import akshare as ak  # type: ignore[import-untyped]
-import pandas as pd  # type: ignore[import-untyped]
 
 from quant_lab.core.data.dimensions.base import safe_fetch
 from quant_lab.core.data.sources._utils import no_proxy, safe_float
