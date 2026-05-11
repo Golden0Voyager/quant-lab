@@ -78,6 +78,15 @@ CRITICAL_KEYS: dict[str, list[str]] = {
     "institution": [
         "fund_holding_count",
     ],
+    "competitor": [
+        "industry_peer_count",
+    ],
+    "smart_money": [
+        "north_consecutive_days",
+    ],
+    "news": [
+        "news_source",
+    ],
 }
 
 # Keys where v2 may legitimately add new fields not in legacy.
