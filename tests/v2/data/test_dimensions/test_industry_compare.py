@@ -8,7 +8,6 @@ import pandas as pd  # type: ignore[import-untyped]
 
 from quant_lab.core.data.dimensions.industry_compare import (
     IndustryCompareFetcher,
-    _get_industry,
     _industry_cache,
     _yjbb_cache,
 )
