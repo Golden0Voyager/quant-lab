@@ -32,6 +32,29 @@ CRITICAL_KEYS: dict[str, list[str]] = {
         "eps_growth_rate_raw",
         "target_price_avg",
     ],
+    "recent_kline": [
+        "boll_mid",
+        "boll_upper",
+        "boll_lower",
+        "boll_width",
+        "boll_position",
+    ],
+    "quarterly_trend": [
+        # list data; parity checks length and first element keys
+    ],
+    "industry_compare": [
+        "peer_count",
+        "roe_median",
+        "roe_rank",
+        "roe_total",
+        "roe_value",
+        "gross_margin_median",
+        "revenue_yoy_median",
+        "profit_yoy_median",
+    ],
+    "top_holders": [
+        # list data; parity checks list length
+    ],
 }
 
 # Keys where v2 may legitimately add new fields not in legacy.
