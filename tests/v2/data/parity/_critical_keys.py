@@ -55,6 +55,18 @@ CRITICAL_KEYS: dict[str, list[str]] = {
     "top_holders": [
         # list data; parity checks list length
     ],
+    "support_resistance": [
+        "resistance_price",
+        "support_price",
+        "resistance_type",
+        "support_type",
+    ],
+    "theme_sentiment": [
+        "stock_sentiment",
+    ],
+    "macro_etf": [
+        "usdcnh_rate",
+    ],
 }
 
 # Keys where v2 may legitimately add new fields not in legacy.
