@@ -43,7 +43,7 @@ class TestQuarterlyTrendFetcher:
         )
 
         fetcher = QuarterlyTrendFetcher()
-        result = fetcher.fetch("600519", "贵州茅台")
+        fetcher.fetch("600519", "贵州茅台")
 
         assert mock_ak.stock_profit_sheet_by_report_em.call_args.kwargs["symbol"] == "SH600519"
 
