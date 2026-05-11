@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pandas as pd  # type: ignore[import-untyped]
-import pytest
 
 from quant_lab.core.data.dimensions.recent_kline import RecentKlineFetcher
 
