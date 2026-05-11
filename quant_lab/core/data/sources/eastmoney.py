@@ -83,3 +83,37 @@ def fetch_stock_info_eastmoney(symbol: str) -> dict[str, Any] | None:
     except Exception as exc:  # noqa: BLE001
         logger.debug("Eastmoney info failed for %s: %s", symbol, exc)
         return None
+
+
+def fetch_profit_sheet(symbol: str) -> dict[str, Any] | None:
+    """Fetch profit sheet by report from Eastmoney.
+
+    Returns the *most recent* report row as a dict.
+    """
+    prefix = "SH" if symbol.startswith("6") else "SZ"
+    try:
+        with no_proxy():
+            df = ak.stock_profit_sheet_by_report_em(symbol=f"{prefix}{symbol}")
+        if df is None or df.empty:
+            return None
+        return dict(df.iloc[0])
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Eastmoney profit sheet failed for %s: %s", symbol, exc)
+        return None
+
+
+def fetch_circulate_holders(symbol: str) -> dict[str, Any] | None:
+    """Fetch top circulate stock holders from Eastmoney.
+
+    Returns the raw DataFrame so the caller can extract latest / previous
+    periods.
+    """
+    try:
+        with no_proxy():
+            df = ak.stock_circulate_stock_holder(symbol=symbol)
+        if df is None or df.empty:
+            return None
+        return {"df": df}
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Eastmoney circulate holders failed for %s: %s", symbol, exc)
+        return None
