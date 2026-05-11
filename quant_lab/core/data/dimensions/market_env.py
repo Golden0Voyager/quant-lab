@@ -197,10 +197,10 @@ class MarketEnvFetcher:
                         and not sz_em.empty
                         and "amount" in sz_em.columns
                     ):
-                        sh_amt = safe_float(sh_em.iloc[-1]["amount"])
-                        sz_amt = safe_float(sz_em.iloc[-1]["amount"])
-                        if sh_amt and sz_amt:
-                            total_amt = sh_amt + sz_amt
+                        sh_amt2 = safe_float(sh_em.iloc[-1]["amount"])
+                        sz_amt2 = safe_float(sz_em.iloc[-1]["amount"])
+                        if sh_amt2 and sz_amt2:
+                            total_amt = sh_amt2 + sz_amt2
                             total_yi = total_amt / 1e8
                             data["market_total_volume"] = self._fmt_volume(
                                 total_yi
@@ -242,10 +242,11 @@ class MarketEnvFetcher:
                     if "volume" in sh_df.columns and len(sh_df) >= 6:
                         sh_vol = safe_float(sh_df.iloc[-1]["volume"])
                         sh_vol_5d = [
-                            safe_float(sh_df.iloc[-i]["volume"])
+                            v
                             for i in range(2, 7)
+                            if (v := safe_float(sh_df.iloc[-i]["volume"]))
+                            is not None
                         ]
-                        sh_vol_5d = [v for v in sh_vol_5d if v]
 
                 sz_cache = (
                     _multi_index_cache["data"].get("深证成指")
@@ -257,10 +258,11 @@ class MarketEnvFetcher:
                     if "volume" in sz_df.columns and len(sz_df) >= 6:
                         sz_vol = safe_float(sz_df.iloc[-1]["volume"])
                         sz_vol_5d = [
-                            safe_float(sz_df.iloc[-i]["volume"])
+                            v
                             for i in range(2, 7)
+                            if (v := safe_float(sz_df.iloc[-i]["volume"]))
+                            is not None
                         ]
-                        sz_vol_5d = [v for v in sz_vol_5d if v]
 
                 if sh_vol:
                     today_total = sh_vol + (sz_vol or 0)
