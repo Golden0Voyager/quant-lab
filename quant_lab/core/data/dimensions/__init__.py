@@ -8,6 +8,7 @@ from quant_lab.core.data.dimensions.industry_compare import IndustryCompareFetch
 from quant_lab.core.data.dimensions.institution import InstitutionFetcher
 from quant_lab.core.data.dimensions.lockup import LockupFetcher
 from quant_lab.core.data.dimensions.macro_etf import MacroETFFetcher
+from quant_lab.core.data.dimensions.market_env import MarketEnvFetcher
 from quant_lab.core.data.dimensions.news import NewsFetcher
 from quant_lab.core.data.dimensions.performance import PerformanceFetcher
 from quant_lab.core.data.dimensions.quarterly_trend import QuarterlyTrendFetcher
@@ -28,6 +29,7 @@ __all__ = [
     "InstitutionFetcher",
     "LockupFetcher",
     "MacroETFFetcher",
+    "MarketEnvFetcher",
     "NewsFetcher",
     "PerformanceFetcher",
     "QuarterlyTrendFetcher",

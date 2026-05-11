@@ -87,6 +87,11 @@ CRITICAL_KEYS: dict[str, list[str]] = {
     "news": [
         "news_source",
     ],
+    "market_env": [
+        "market_sentiment_score",
+        "market_up_count",
+        "market_down_count",
+    ],
 }
 
 # Keys where v2 may legitimately add new fields not in legacy.
