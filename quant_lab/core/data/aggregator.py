@@ -1,116 +1,168 @@
-"""Multi-dimension aggregator for quant_lab.
+"""Data aggregator — orchestrates all DimensionFetchers.
 
-Combines results from multiple ``DimensionFetcher`` objects into a
-single flat dict compatible with the legacy
-``analyst_data.fetch_full_stock_data`` output.
+Replaces legacy ``fetch_extended_data`` and ``fetch_full_stock_data``
+with a single sequential pipeline that:
+
+1. Runs independent dimensions
+2. Injects merged results as *context* for downstream dimensions
+   (e.g. ``SupportResistanceFetcher``)
+3. Computes cross-metrics (PEG, PS-TTM)
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
-from quant_lab.core.data.registry import DimensionRegistry
+from quant_lab.core.data.dimensions import (
+    ChipFetcher,
+    CompetitorFetcher,
+    ConsensusFetcher,
+    IndustryCompareFetcher,
+    InstitutionFetcher,
+    LockupFetcher,
+    MacroETFFetcher,
+    MarketEnvFetcher,
+    NewsFetcher,
+    PerformanceFetcher,
+    QuarterlyTrendFetcher,
+    RecentKlineFetcher,
+    SentimentFetcher,
+    SmartMoneyFetcher,
+    SupportResistanceFetcher,
+    ThemeSentimentFetcher,
+    TopHoldersFetcher,
+    ValuationFetcher,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class StockAggregator:
-    """Orchestrator that fetches and merges dimension data for a stock.
+    """Backward-compatible wrapper around :func:`aggregate`.
 
-    Usage::
-
-        registry = DimensionRegistry(cache=...)
-        registry.register("valuation", ValuationFetcher())
-        ...
-
-        agg = StockAggregator(registry)
-        result = agg.aggregate("000001", "平安银行")
+    Legacy code imports ``StockAggregator`` from ``quant_lab.core.data``.
+    This class simply delegates to the module-level ``aggregate`` function.
     """
 
-    def __init__(self, registry: DimensionRegistry) -> None:
-        self._registry = registry
-
-    def aggregate(
-        self,
-        symbol: str,
-        stock_name: str,
-        dimensions: list[str] | None = None,
-        *,
-        asset_type: str = "stock",
-        use_cache: bool = True,
-    ) -> dict[str, Any]:
-        """Fetch *dimensions* and return a unified flat dict.
-
-        The returned dict always contains:
-
-        - ``code`` – *symbol*
-        - ``name`` – *stock_name*
-        - ``type`` – *asset_type*
-        - ``timestamp`` – ISO-8601 fetch time
-
-        plus the merged fields from every dimension fetcher.
-        """
-        from datetime import datetime
-
-        result: dict[str, Any] = {
-            "code": symbol,
-            "name": stock_name,
-            "type": asset_type,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
-
-        fetched = self._registry.fetch_all(
-            symbol, stock_name, names=dimensions, use_cache=use_cache
-        )
-
-        for dim_name, dim_data in fetched.items():
-            if "_error" in dim_data:
-                logger.warning(
-                    "Dimension %s failed for %s: %s",
-                    dim_name,
-                    symbol,
-                    dim_data["_error"],
-                )
-            # Merge dimension data into the main result dict.
-            # Dimension keys that collide with base keys (code/name/type/timestamp)
-            # are silently overwritten – this matches the legacy behaviour where
-            # ``result.update(valuation_data)`` was used.
-            result.update(dim_data)
-
-        # Cross-calculation: PEG = PE-TTM / expected earnings growth
-        self._calc_peg(result)
-
-        return result
-
     @staticmethod
-    def _calc_peg(data: dict[str, Any]) -> None:
-        """Compute PEG in-place when PE-TTM and growth rate are available."""
-        pe_ttm = data.get("pe_ttm_raw")
-        eps_growth = data.get("eps_growth_rate_raw")
-        if pe_ttm is None or eps_growth is None:
-            return
-        try:
-            pe_val = float(pe_ttm)
-            growth_val = float(eps_growth)
-        except (TypeError, ValueError):
-            return
+    def aggregate(
+        symbol: str, stock_name: str, asset_type: str = "stock"
+    ) -> dict[str, Any]:
+        """Delegate to :func:`aggregate`."""
+        return aggregate(symbol, stock_name, asset_type)
 
-        if growth_val <= 0:
-            return
 
-        peg = pe_val / growth_val
-        data["peg"] = f"{peg:.2f}"
-        data["peg_raw"] = peg
-        if peg < 0.5:
-            signal = f"极度低估(PEG={peg:.2f}<0.5)"
-        elif peg < 1:
-            signal = f"偏低估(PEG={peg:.2f}<1)"
-        elif peg < 1.5:
-            signal = f"合理(PEG={peg:.2f})"
-        elif peg < 2:
-            signal = f"偏高估(PEG={peg:.2f})"
-        else:
-            signal = f"高估(PEG={peg:.2f}>2)"
-        data["peg_signal"] = signal
-        logger.info("✓ PEG计算成功: %s", signal)
+def aggregate(
+    symbol: str, stock_name: str, asset_type: str = "stock"
+) -> dict[str, Any]:
+    """Fetch and merge all dimensions for *symbol*.
+
+    Args:
+        symbol: Stock / ETF / index code.
+        stock_name: Human-readable name.
+        asset_type: ``"stock"`` (default) or ``"etf"`` / ``"index"``.
+
+    Returns:
+        Flat dictionary containing metadata, all dimension data,
+        and cross-computed metrics.
+    """
+    result: dict[str, Any] = {
+        "code": symbol,
+        "name": stock_name,
+        "type": asset_type,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+    if asset_type == "stock":
+        _aggregate_stock(result, symbol, stock_name)
+    else:
+        _aggregate_etf_or_index(result, symbol, stock_name)
+
+    return result
+
+
+def _aggregate_stock(
+    result: dict[str, Any], symbol: str, stock_name: str
+) -> None:
+    """Run all stock-specific dimensions."""
+    fetchers: list[Any] = [
+        ValuationFetcher(),
+        PerformanceFetcher(),
+        SentimentFetcher(),
+        MacroETFFetcher(),
+        ConsensusFetcher(),
+        RecentKlineFetcher(),
+        QuarterlyTrendFetcher(),
+        IndustryCompareFetcher(),
+        TopHoldersFetcher(),
+        ThemeSentimentFetcher(),
+        MarketEnvFetcher(),
+        LockupFetcher(),
+        ChipFetcher(),
+        InstitutionFetcher(),
+        CompetitorFetcher(),
+        SmartMoneyFetcher(),
+        NewsFetcher(),
+    ]
+
+    for fetcher in fetchers:
+        result.update(fetcher.fetch(symbol, stock_name))
+
+    # Support/resistance needs upstream context (prices, MA, BOLL)
+    sr = SupportResistanceFetcher()
+    result.update(sr.fetch(symbol, stock_name, context=result))
+
+    # Cross-computations
+    _compute_peg(result)
+    _compute_ps_ttm(result)
+
+
+def _aggregate_etf_or_index(
+    result: dict[str, Any], symbol: str, stock_name: str
+) -> None:
+    """Run lightweight dimensions for ETF / index."""
+    fetchers: list[Any] = [
+        SentimentFetcher(),
+        MacroETFFetcher(),
+        MarketEnvFetcher(),
+    ]
+    for fetcher in fetchers:
+        result.update(fetcher.fetch(symbol, stock_name))
+
+
+def _compute_peg(data: dict[str, Any]) -> None:
+    """PEG = PE-TTM / expected earnings growth rate."""
+    try:
+        pe = data.get("pe_ttm_raw")
+        growth = data.get("eps_growth_rate_raw")
+        if pe and growth and growth > 0:
+            peg = pe / growth
+            data["peg"] = f"{peg:.2f}"
+            data["peg_raw"] = peg
+            if peg < 0.5:
+                data["peg_signal"] = f"极度低估(PEG={peg:.2f}<0.5)"
+            elif peg < 1:
+                data["peg_signal"] = f"偏低估(PEG={peg:.2f}<1)"
+            elif peg < 1.5:
+                data["peg_signal"] = f"合理(PEG={peg:.2f})"
+            elif peg < 2:
+                data["peg_signal"] = f"偏高估(PEG={peg:.2f})"
+            else:
+                data["peg_signal"] = f"高估(PEG={peg:.2f}>2)"
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _compute_ps_ttm(data: dict[str, Any]) -> None:
+    """PS-TTM = market cap / revenue TTM."""
+    try:
+        market_cap = data.get("market_cap")
+        revenue = data.get("revenue_ttm_raw")
+        if market_cap and revenue and revenue > 0:
+            ps = market_cap / revenue
+            data["ps_ttm"] = f"{ps:.2f}"
+            data["ps_ttm_raw"] = ps
+    except Exception:  # noqa: BLE001
+        pass
