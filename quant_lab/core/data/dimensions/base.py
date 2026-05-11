@@ -21,11 +21,16 @@ class DimensionFetcher(Protocol):
 
     name: str
 
-    def fetch(self, symbol: str, stock_name: str) -> dict[str, Any]:
+    def fetch(
+        self, symbol: str, stock_name: str, **kwargs: Any
+    ) -> dict[str, Any]:
         """Return a flat dict of data fields for *symbol*.
 
         On failure the dict should contain ``_error`` and ``_dimension``
         keys rather than raising.
+
+        ``**kwargs`` allows the aggregator to inject upstream context
+        (e.g. prices, moving averages) when a dimension depends on it.
         """
         ...
 
@@ -42,10 +47,12 @@ def safe_fetch(
     """
 
     @functools.wraps(func)
-    def wrapper(self: Any, symbol: str, stock_name: str) -> dict[str, Any]:
+    def wrapper(
+        self: Any, symbol: str, stock_name: str, **kwargs: Any
+    ) -> dict[str, Any]:
         dim_name = getattr(self, "name", func.__name__)
         try:
-            return func(self, symbol, stock_name)
+            return func(self, symbol, stock_name, **kwargs)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Dimension %s failed for %s: %s", dim_name, symbol, exc)
             return {"_error": str(exc), "_dimension": dim_name}
