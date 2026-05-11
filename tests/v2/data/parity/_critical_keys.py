@@ -67,6 +67,17 @@ CRITICAL_KEYS: dict[str, list[str]] = {
     "macro_etf": [
         "usdcnh_rate",
     ],
+    "lockup": [
+        "lockup_risk_level",
+        "lockup_6m_total_pct",
+    ],
+    "chip": [
+        "chip_profit_ratio_raw",
+        "chip_avg_cost_raw",
+    ],
+    "institution": [
+        "fund_holding_count",
+    ],
 }
 
 # Keys where v2 may legitimately add new fields not in legacy.
