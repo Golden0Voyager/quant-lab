@@ -69,3 +69,6 @@ watchlists.json
 .claude/settings.local.json
 .gemini/
 .pdca-status.json
+# Skill-generated analysis artifacts
+.understand-anything/
+.codegraph/
