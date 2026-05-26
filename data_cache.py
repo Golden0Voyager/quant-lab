@@ -58,11 +58,11 @@ class DataCache:
             db_path: SQLite数据库路径（默认: cache/quant_cache.db）
         """
         if db_path is None:
-            # 默认使用 cache/ 目录下的数据库
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            cache_dir = os.path.join(script_dir, "cache")
-            os.makedirs(cache_dir, exist_ok=True)
-            db_path = os.path.join(cache_dir, "quant_cache.db")
+            # 默认使用共享数据目录：~/Code/data/quant_data/
+            # 三个项目（smartmoney_hunter / quant_lab / Trading_Agents）共用
+            shared_dir = os.path.expanduser("~/Code/data/quant_data")
+            os.makedirs(shared_dir, exist_ok=True)
+            db_path = os.path.join(shared_dir, "quant_cache.db")
 
         self.db_path = db_path
         self._init_database()
