@@ -8,7 +8,7 @@
 # 基础命令
 # ============================================
 stock() {
-    python /Users/hainingyu/Code/quant_lab/main.py "$@"
+    /Users/hainingyu/Code/quant_lab/.venv/bin/python /Users/hainingyu/Code/quant_lab/main.py "$@"
 }
 
 # ============================================
@@ -69,8 +69,8 @@ with open('/Users/hainingyu/Code/quant_lab/watchlists.json') as f:
 # ============================================
 alias stock-report='ls -lt /Users/hainingyu/Code/quant_lab/Report/$(date +%y%m%d)/ 2>/dev/null || echo "今日暂无报告"'
 alias stock-log='tail -f /tmp/quant_lab_log.txt'
-alias stock-cache='sqlite3 /Users/hainingyu/Code/quant_lab/quant_cache.db "SELECT symbol, datetime(cached_at, \"unixepoch\", \"localtime\") as cached_time FROM data_cache ORDER BY cached_at DESC LIMIT 20;"'
-alias stock-cache-clear='rm -f /Users/hainingyu/Code/quant_lab/quant_cache.db && echo "缓存已清除"'
+alias stock-cache='sqlite3 /Users/hainingyu/Code/data/quant_data/quant_cache.db "SELECT symbol, datetime(cached_at, \"unixepoch\", \"localtime\") as cached_time FROM data_cache ORDER BY cached_at DESC LIMIT 20;"'
+alias stock-cache-clear='rm -f /Users/hainingyu/Code/data/quant_data/quant_cache.db && echo "缓存已清除"'
 
 # 缓存预热（盘后运行，第二天查数据更快）
 stock-warm() { stock --warm-cache "${1:-my}"; }
