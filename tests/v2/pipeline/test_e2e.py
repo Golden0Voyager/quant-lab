@@ -169,7 +169,7 @@ class TestDeepPipelineE2E:
         client.chat.return_value = "强制深度分析"
         mock_create_client.return_value = client
 
-        steps = build_deep_pipeline(provider="modelscope", model="qwen-max")
+        steps = build_deep_pipeline(provider="modelscope", model="qwen-max", use_cache=False)
         runner = PipelineRunner(steps)
         initial = AnalysisState(symbol="000001", stock_name="平安银行")
         result = runner.run(initial)
@@ -210,7 +210,7 @@ class TestFastPipelineE2E:
         client.chat.return_value = "快速分析"
         mock_create_client.return_value = client
 
-        steps = build_fast_pipeline(provider="modelscope", model="deepseek-v3")
+        steps = build_fast_pipeline(provider="modelscope", model="deepseek-v3", use_cache=False)
         runner = PipelineRunner(steps)
         initial = AnalysisState(symbol="000001", stock_name="平安银行")
         result = runner.run(initial)

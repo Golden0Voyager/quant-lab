@@ -48,6 +48,7 @@ def build_auto_pipeline(
 def build_deep_pipeline(
     provider: str = "modelscope",
     model: str | None = None,
+    deep_model: str | None = None,
     prompt_version: str = "professional",
     use_cache: bool = True,
     cache: DataCacheFacade | None = None,
@@ -66,6 +67,8 @@ def build_deep_pipeline(
 def build_fast_pipeline(
     provider: str = "modelscope",
     model: str | None = None,
+    deep_model: str | None = None,
+    prompt_version: str = "professional",
     use_cache: bool = True,
     cache: DataCacheFacade | None = None,
 ) -> list[PipelineStep]:
