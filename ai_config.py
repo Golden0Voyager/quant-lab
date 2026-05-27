@@ -1,3 +1,12 @@
+"""Legacy global configuration module (DEPRECATED).
+
+All new code should import from ``quant_lab.core.config`` instead.
+This module is kept as a thin backward-compatibility layer and will be
+removed in Phase 9.
+"""
+
+from __future__ import annotations
+
 import logging
 import os
 import threading
@@ -12,8 +21,31 @@ from openai import OpenAI
 # （绕过 trust_env=False 的限制）
 _yahoo_proxy = threading.local()
 
-# 默认代理地址（仅用于 Yahoo Finance，国内 API 全部直连）
-YAHOO_PROXY_URL = os.getenv("YAHOO_PROXY", "http://127.0.0.1:7897")
+# 默认代理地址（从 v2 配置读取，保留全局变量名供 legacy 引用）
+# 延迟求值，避免在导入时触发配置初始化
+
+
+def _yahoo_proxy_url() -> str:
+    """Return the current Yahoo proxy URL from v2 settings."""
+    try:
+        from quant_lab.core.config import get_settings
+        return get_settings().yahoo_proxy_url
+    except Exception:
+        return os.getenv("YAHOO_PROXY", "http://127.0.0.1:7897")
+
+
+# 保留旧的全局名称，但使用 property-like 延迟求值
+class _LazyProxyURL:
+    """Compatibility shim so ``ai_config.YAHOO_PROXY_URL`` still works."""
+
+    def __str__(self) -> str:
+        return _yahoo_proxy_url()
+
+    def __repr__(self) -> str:
+        return repr(_yahoo_proxy_url())
+
+
+YAHOO_PROXY_URL = _LazyProxyURL()  # type: ignore[assignment]
 
 # ==================== 全局网络配置优化 (DEPRECATED) ====================
 
@@ -51,7 +83,8 @@ def init_global_network():
 
 
 # ==================== 全局 AI 配置中心 (DEPRECATED) ====================
-# 以下函数和变量已被 quant_lab.core.llm 模块取代，保留仅用于向后兼容。
+# 以下函数和变量已被 quant_lab.core.llm / quant_lab.core.config 取代，
+# 保留仅用于向后兼容。
 
 # 支持的模型配置列表
 MODEL_CONFIGS = {
@@ -99,7 +132,12 @@ def get_current_config():
         DeprecationWarning,
         stacklevel=2,
     )
-    return MODEL_CONFIGS.get(ACTIVE_PROFILE, MODEL_CONFIGS["deepseek"])
+    # 优先委托给 v2 配置
+    try:
+        from quant_lab.core.config import get_settings
+        return get_settings().model_dump_legacy()
+    except Exception:
+        return MODEL_CONFIGS.get(ACTIVE_PROFILE, MODEL_CONFIGS["deepseek"])
 
 
 def get_primary_model_name():
@@ -110,7 +148,11 @@ def get_primary_model_name():
         DeprecationWarning,
         stacklevel=2,
     )
-    return get_current_config()["model"]
+    try:
+        from quant_lab.core.config import get_settings
+        return get_settings().default_model
+    except Exception:
+        return get_current_config()["model"]
 
 
 def get_backup_model_name():
@@ -121,8 +163,8 @@ def get_backup_model_name():
         DeprecationWarning,
         stacklevel=2,
     )
-    config = get_current_config()
-    # 优先使用配置中的 backup_model，如果没有则硬编码一个保底
+    # 优先使用 legacy MODEL_CONFIGS 中的 backup_model
+    config = MODEL_CONFIGS.get(ACTIVE_PROFILE, MODEL_CONFIGS["deepseek"])
     return config.get("backup_model", "glm-4.7")
 
 

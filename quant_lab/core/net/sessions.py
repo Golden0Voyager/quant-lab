@@ -125,6 +125,7 @@ def _install_patched_session_init() -> None:
     from requests.adapters import HTTPAdapter  # type: ignore[import-untyped]
 
     import ai_config  # type: ignore[import-not-found]
+    from quant_lab.core.config import get_settings
 
     _original_session_init = requests.Session.__init__
 
@@ -134,7 +135,9 @@ def _install_patched_session_init() -> None:
         self.headers.update({"User-Agent": _DEFAULT_UA})
 
         if getattr(ai_config._yahoo_proxy, "active", False):
-            proxy_url = getattr(ai_config._yahoo_proxy, "proxy_url", ai_config.YAHOO_PROXY_URL)
+            proxy_url = getattr(
+                ai_config._yahoo_proxy, "proxy_url", None
+            ) or get_settings().yahoo_proxy_url
             if proxy_url:
                 self.proxies = {"http": proxy_url, "https": proxy_url}
 
