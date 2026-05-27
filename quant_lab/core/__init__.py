@@ -12,7 +12,6 @@ __all__ = [
     "data",
     "pipeline",
     "memory",
-    "config",
     "cli",
-    "watchlists",
+    "config",
 ]

@@ -737,9 +737,47 @@ if __name__ == "__main__":
     parser.add_argument('--global', dest='global_stock', help='全球股票分析模式 (如 TSLA, AAPL, MSFT)')
     parser.add_argument('--delay', type=float, default=2.0)
     parser.add_argument('--yes', '-y', action='store_true')
+    parser.add_argument('--v2', action='store_true', help='使用 v2 pipeline 引擎')
+    parser.add_argument('--memory-migrate', action='store_true', help='将历史报告导入 memory log')
+    parser.add_argument('--memory-stats', action='store_true', help='查看 memory log 统计')
 
     args = parser.parse_args()
 
+    # ── memory 路由 ───────────────────────────────────────────────────
+    if args.memory_migrate:
+        from quant_lab.core.cli import run_memory_migration
+        run_memory_migration(dry_run=False)
+        sys.exit(0)
+
+    if args.memory_stats:
+        from quant_lab.core.cli import run_memory_stats
+        run_memory_stats()
+        sys.exit(0)
+
+    # ── v2 pipeline 路由 ──────────────────────────────────────────────
+    if args.v2:
+        from quant_lab.core.cli import run_v2_single_stock, run_v2_monitor_mode
+
+        if args.stock:
+            code, name = args.stock.split(':', 1) if ':' in args.stock else (args.stock, None)
+            run_v2_single_stock(
+                symbol=code.strip(),
+                stock_name=name.strip() if name else None,
+                analysis_mode=args.analysis_mode,
+                prompt_version=args.prompt_version,
+            )
+            sys.exit(0)
+
+        # 监控模式（含交互式选择）
+        selected = args.list or (args.no_interaction and 'my') or get_user_choice_with_timeout()
+        run_v2_monitor_mode(
+            watchlist_name=selected,
+            analysis_mode=args.analysis_mode,
+            prompt_version=args.prompt_version,
+        )
+        sys.exit(0)
+
+    # ── legacy 路由（保持不变）──────────────────────────────────────────
     if args.warm_cache:
         run_warm_cache(args.warm_cache)
         sys.exit(0)
