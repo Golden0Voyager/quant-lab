@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from quant_lab.core.memory.log import AnalysisMemoryLog
 from quant_lab.core.pipeline.base import PipelineStep
 from quant_lab.core.pipeline.state import AnalysisState
 
@@ -173,12 +174,18 @@ class BuildPromptStep(PipelineStep):
 
     Args:
         prompt_version: brain 模式的风格 (professional / value_first / quant_hybrid).
+        include_memory: 是否在 prompt 中注入历史记忆上下文.
     """
 
     name = "build_prompt"
 
-    def __init__(self, prompt_version: str = "professional") -> None:
+    def __init__(
+        self,
+        prompt_version: str = "professional",
+        include_memory: bool = True,
+    ) -> None:
         self.prompt_version = prompt_version
+        self.include_memory = include_memory
 
     def run(self, state: AnalysisState) -> AnalysisState:
         data = state.raw_data
@@ -188,6 +195,16 @@ class BuildPromptStep(PipelineStep):
         else:
             prompt = _build_worker_prompt(data)
             logger.info("🤖 构建 Worker 快速 prompt")
+
+        # Inject past context from memory layer
+        if self.include_memory:
+            try:
+                log = AnalysisMemoryLog()
+                past = log.get_past_context(state.symbol, n_same=3, n_cross=2)
+                if past:
+                    prompt += f"\n\n## 历史决策参考\n\n{past}\n"
+            except Exception as exc:
+                logger.debug("Memory context injection skipped: %s", exc)
 
         return self._stamp(
             state.model_copy(update={"prompt": prompt}),
