@@ -71,7 +71,7 @@ def _load_watchlist(name: str) -> list[dict]:
 
     if os.path.exists(config_file):
         try:
-            with open(config_file, "r", encoding="utf-8") as f:
+            with open(config_file, encoding="utf-8") as f:
                 config = json.load(f)
             if name in config and "stocks" in config[name]:
                 return [
@@ -171,7 +171,7 @@ def run_v2_monitor_mode(
     model: str | None = None,
     deep_model: str | None = None,
     use_cache: bool = True,
-    max_workers: int = 3,
+    max_workers: int = 5,
 ) -> None:
     """Run the v2 pipeline for every stock in a watchlist.
 
@@ -292,8 +292,6 @@ def run_v2_monitor_mode(
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_map = {}
         for idx, (code, (item, data)) in enumerate(fetched_map.items()):
-            if idx > 0:
-                time.sleep(2)  # rate-limit submissions
             future = executor.submit(_analyze_one, code, item, data)
             future_map[future] = code
             print(f"  [→ 提交 {idx+1}/{ai_total}] {item['name']}")
