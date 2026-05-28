@@ -10,6 +10,8 @@ from pydantic import BaseModel
 
 from quant_lab.core.net import make_llm_session
 
+from .rate_limit import get_limiter
+
 logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
@@ -29,9 +31,11 @@ class OpenAICompatibleClient:
         api_key: str,
         base_url: str,
         timeout: float = 180.0,
+        provider: str = "",
     ) -> None:
         self._model = model
         self._timeout = timeout
+        self._limiter = get_limiter(provider) if provider else None
 
         http_client = make_llm_session(timeout=timeout)
         self._client = OpenAI(
@@ -69,6 +73,8 @@ class OpenAICompatibleClient:
         schema: type[T],
         temperature: float,
     ) -> T:
+        if self._limiter:
+            self._limiter.acquire()
         completion = self._client.beta.chat.completions.parse(
             model=self._model,
             messages=[
@@ -84,6 +90,8 @@ class OpenAICompatibleClient:
         return parsed
 
     def _chat_free_text(self, prompt: str, temperature: float) -> str:
+        if self._limiter:
+            self._limiter.acquire()
         completion = self._client.chat.completions.create(
             model=self._model,
             messages=[
@@ -106,6 +114,8 @@ class DeepSeekClient(OpenAICompatibleClient):
     """
 
     def _chat_free_text(self, prompt: str, temperature: float) -> str:
+        if self._limiter:
+            self._limiter.acquire()
         completion = self._client.chat.completions.create(
             model=self._model,
             messages=[
