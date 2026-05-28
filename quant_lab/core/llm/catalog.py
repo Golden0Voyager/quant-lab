@@ -84,6 +84,37 @@ class ModelCatalog:
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
             description="Qwen3 VL Plus (DashScope) - 多模态",
         ),
+        # SenseNova (免费 DeepSeek 系列，OpenAI 兼容)
+        "DeepSeek-V3-1": ModelInfo(
+            provider="sensenova",
+            model_id="DeepSeek-V3-1",
+            display_name="SenseNova DeepSeek V3-1",
+            supports_structured=True,
+            api_key_env="SENSENOVA_API_KEY",
+            base_url="https://api.sensenova.cn/compatible-mode/v2",
+            description="SenseNova DeepSeek V3-1 — 免费通用模型，32K 上下文，限时免费至 2026-08-09",
+        ),
+        "DeepSeek-R1": ModelInfo(
+            provider="sensenova",
+            model_id="DeepSeek-R1",
+            display_name="SenseNova DeepSeek R1",
+            supports_structured=False,  # R1 不支持 tool_choice
+            supports_thinking=True,
+            api_key_env="SENSENOVA_API_KEY",
+            base_url="https://api.sensenova.cn/compatible-mode/v2",
+            description="SenseNova DeepSeek R1 — 免费推理模型，限时免费至 2026-08-09",
+        ),
+        "DeepSeek-R1-Distill-Qwen-32B": ModelInfo(
+            provider="sensenova",
+            model_id="DeepSeek-R1-Distill-Qwen-32B",
+            display_name="SenseNova R1 Distill 32B",
+            supports_structured=False,
+            supports_thinking=True,
+            api_key_env="SENSENOVA_API_KEY",
+            base_url="https://api.sensenova.cn/compatible-mode/v2",
+            description="SenseNova R1 Distill 32B — 永久免费，8K 上下文",
+        ),
+
         # Anthropic (via native SDK or OpenRouter)
         "claude-sonnet-4-6-20251101": ModelInfo(
             provider="anthropic",

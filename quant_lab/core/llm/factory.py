@@ -58,19 +58,21 @@ def create_client(
             info.api_key_env,
         )
 
-    if provider in ("modelscope", "dashscope", "openrouter"):
+    if provider in ("modelscope", "dashscope", "openrouter", "sensenova"):
         if "deepseek" in model.lower() and "r1" in model.lower():
             return DeepSeekClient(
                 model=model,
                 api_key=_api_key or "",
                 base_url=info.base_url,
                 timeout=timeout,
+                provider=provider,
             )
         return OpenAICompatibleClient(
             model=model,
             api_key=_api_key or "",
             base_url=info.base_url,
             timeout=timeout,
+            provider=provider,
         )
 
     if provider == "anthropic":
