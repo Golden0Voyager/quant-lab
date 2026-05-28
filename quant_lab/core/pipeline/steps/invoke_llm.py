@@ -6,6 +6,7 @@ import logging
 
 from pydantic import BaseModel
 
+from quant_lab.core.llm.catalog import ModelCatalog
 from quant_lab.core.llm.factory import create_client
 from quant_lab.core.llm.structured import invoke_structured_or_freetext
 from quant_lab.core.pipeline.base import PipelineStep
@@ -56,7 +57,15 @@ class InvokeLLMStep(PipelineStep):
 
         client = create_client(self.provider, model=model)
 
-        if self.structured:
+        # R1 等 thinking 模型不支持 tool_choice，跳过结构化输出
+        effective_structured = self.structured
+        if effective_structured and model:
+            info = ModelCatalog.lookup(model)
+            if info and not info.supports_structured:
+                logger.info("🔧 模型 %s 不支持结构化输出，使用自由文本", model)
+                effective_structured = False
+
+        if effective_structured:
             logger.debug("🎯 尝试结构化输出 (StockAnalysis)")
             result = invoke_structured_or_freetext(
                 client,
