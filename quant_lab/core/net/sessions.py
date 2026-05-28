@@ -25,6 +25,8 @@ def make_china_session(
     timeout: float = 30.0,
     retries: int = 2,
     headers: dict[str, str] | None = None,
+    pool_connections: int = 10,
+    pool_maxsize: int = 10,
 ) -> Any:
     """Create a ``requests.Session`` tuned for China APIs.
 
@@ -37,6 +39,8 @@ def make_china_session(
         timeout: Request timeout in seconds (used by callers, not set on session).
         retries: Max retry attempts for the HTTP adapter.
         headers: Additional headers merged into the session.
+        pool_connections: Number of connection pools to cache.
+        pool_maxsize: Max connections per pool.
 
     Returns:
         A configured ``requests.Session`` instance.
@@ -50,7 +54,11 @@ def make_china_session(
         session.headers.update(headers)
 
     retry_strategy = make_retry_strategy(total=retries)
-    adapter = HTTPAdapter(max_retries=retry_strategy)
+    adapter = HTTPAdapter(
+        max_retries=retry_strategy,
+        pool_connections=pool_connections,
+        pool_maxsize=pool_maxsize,
+    )
     session.mount("http://", adapter)
     session.mount("https://", adapter)
 
