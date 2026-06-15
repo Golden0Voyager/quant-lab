@@ -15,8 +15,6 @@ import sqlite3
 from datetime import datetime
 from typing import Any
 
-from quant_lab.core.memory.path import safe_ticker_component
-
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DB_PATH = os.path.expanduser("~/Code/data/quant_data/quant_cache.db")
@@ -195,7 +193,7 @@ class AnalysisMemoryLog:
                 "triggers", "analysis_mode", "report_path", "raw_data_summary",
                 "status", "created_at",
             ]
-            return [dict(zip(columns, row)) for row in rows]
+            return [dict(zip(columns, row, strict=False)) for row in rows]
         finally:
             conn.close()
 
@@ -237,7 +235,7 @@ class AnalysisMemoryLog:
             if row is None:
                 return None
             columns = [d[0] for d in cursor.description]
-            record = dict(zip(columns, row))
+            record = dict(zip(columns, row, strict=False))
             logger.info(
                 "✅ Memory resolved: id=%s raw=%.2f%% alpha=%.2f%%",
                 entry_id,

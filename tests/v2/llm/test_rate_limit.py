@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from unittest.mock import patch
 
 from quant_lab.core.llm.rate_limit import RateLimiter, get_limiter
 

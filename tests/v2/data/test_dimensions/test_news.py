@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from unittest.mock import MagicMock, patch
 
 from quant_lab.core.data.dimensions.news import NewsFetcher

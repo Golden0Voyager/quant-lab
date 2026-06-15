@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch, mock_open
-
-import pytest
+from unittest.mock import MagicMock, mock_open, patch
 
 from quant_lab.core.cli import (
     _load_watchlist,
@@ -15,7 +13,6 @@ from quant_lab.core.cli import (
     run_memory_migration,
     run_memory_stats,
     run_v2_monitor_mode,
-    _infer_asset_type,
 )
 
 

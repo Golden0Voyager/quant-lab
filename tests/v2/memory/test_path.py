@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from quant_lab.core.memory.path import safe_ticker_component
 
 
