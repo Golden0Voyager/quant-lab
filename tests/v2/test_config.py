@@ -57,12 +57,24 @@ class TestQuantLabSettings:
     def test_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("QUANT_LAB_LLM_PROVIDER", "dashscope")
         monkeypatch.setenv("QUANT_LAB_LLM_MODEL", "glm-4.7")
-        # Clear cache so the new env vars are picked up
         get_settings.cache_clear()
         s = get_settings()
         assert s.llm_provider == "dashscope"
         assert s.llm_model == "glm-4.7"
         assert s.default_model == "glm-4.7"
+
+    def test_model_dump_legacy_with_valid_model(self) -> None:
+        """Lines 118+: valid model → return dict."""
+        settings = QuantLabSettings(llm_model="deepseek-ai/DeepSeek-V3.2")
+        result = settings.model_dump_legacy()
+        assert "api_key_env" in result
+        assert "model" in result
+
+    def test_model_dump_legacy_with_invalid_model(self) -> None:
+        """Line 117: model not in catalog → return empty dict."""
+        settings = QuantLabSettings(llm_model="nonexistent-model-xyz")
+        result = settings.model_dump_legacy()
+        assert result == {}
 
 
 class TestGetSettingsSingleton:

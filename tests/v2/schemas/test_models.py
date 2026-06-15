@@ -101,6 +101,31 @@ class TestStockAnalysis:
         assert "中线策略" in md
 
 
+class TestRenderStockAnalysisExtended:
+    def test_with_strategies(self) -> None:
+        a = StockAnalysis(
+            ticker="000001",
+            name="平安银行",
+            rating=StockRating.HOLD,
+            confidence=0.7,
+            strategy_short_term="短线观望",
+            strategy_mid_term="中线持有",
+        )
+        result = render_stock_analysis(a)
+        assert "短线" in result
+        assert "中线" in result
+
+    def test_without_strategies(self) -> None:
+        a = StockAnalysis(
+            ticker="000001",
+            name="平安银行",
+            rating=StockRating.HOLD,
+            confidence=0.7,
+        )
+        result = render_stock_analysis(a)
+        assert "操作策略" not in result
+
+
 class TestFundAnalysis:
     """Tests for FundAnalysis schema."""
 
@@ -130,6 +155,32 @@ class TestFundAnalysis:
         assert "沪深300ETF" in md
         assert "持仓穿透" in md
         assert "茅台、平安" in md
+
+
+class TestRenderFundAnalysisExtended:
+    def test_with_target_nav(self) -> None:
+        a = FundAnalysis(
+            ticker="399050",
+            name="中证互联网",
+            rating=FundRating.BUY,
+            confidence=0.8,
+            target_nav=1.2345,
+            time_horizon="6个月",
+        )
+        result = render_fund_analysis(a)
+        assert "1.2345" in result
+        assert "6个月" in result
+
+    def test_with_holdings_penetration(self) -> None:
+        a = FundAnalysis(
+            ticker="399050",
+            name="中证互联网",
+            rating=FundRating.HOLD,
+            confidence=0.7,
+            holdings_penetration_summary="前十大重仓占比60%",
+        )
+        result = render_fund_analysis(a)
+        assert "持仓穿透" in result
 
 
 class TestIndexAnalysis:
@@ -177,6 +228,21 @@ class TestIndexAnalysis:
         assert "80%" in md
 
 
+class TestRenderIndexAnalysisExtended:
+    def test_basic(self) -> None:
+        a = IndexAnalysis(
+            ticker="000300",
+            name="沪深300",
+            market_assessment=MarketAssessment.CONSOLIDATION,
+            confidence=0.7,
+            risk_level=3,
+            suggested_position="半仓",
+        )
+        result = render_index_analysis(a)
+        assert "震荡市" in result
+        assert "半仓" in result
+
+
 class TestBatchValuationResult:
     """Tests for BatchValuationResult schema."""
 
@@ -212,3 +278,21 @@ class TestBatchValuationResult:
         md = render_batch_result(result)
         assert "平安银行" in md
         assert "**PE**: 5.2" in md
+
+
+class TestRenderBatchResultExtended:
+    def test_basic(self) -> None:
+        analysis = StockAnalysis(
+            ticker="000001",
+            name="平安银行",
+            rating=StockRating.HOLD,
+            confidence=0.7,
+        )
+        result = BatchValuationResult(
+            ticker="000001",
+            name="平安银行",
+            analysis=analysis,
+            metrics_digest="PE=5.2",
+        )
+        rendered = render_batch_result(result)
+        assert "PE=5.2" in rendered

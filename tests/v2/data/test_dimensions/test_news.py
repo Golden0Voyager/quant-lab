@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from unittest.mock import MagicMock, patch
 
 from quant_lab.core.data.dimensions.news import NewsFetcher
@@ -85,3 +86,105 @@ class TestNewsFetcher:
 
         assert result["news_summary"] == "静默"
         assert result["news_source"] == "无"
+
+    @patch.dict("sys.modules", {"analyst_base": None})
+    @patch("quant_lab.core.data.dimensions.news.DDGS", None)
+    def test_import_error_no_ddgs(self) -> None:
+        fetcher = NewsFetcher()
+        result = fetcher.fetch("000001", "平安银行")
+
+        assert result["news_summary"] is None
+        assert result["news_source"] is None
+        assert "news_data_date" in result
+
+    @patch("analyst_base.get_eastmoney_announcements")
+    def test_eastmoney_exception(self, mock_announce: MagicMock) -> None:
+        mock_announce.side_effect = Exception("API fail")
+
+        fetcher = NewsFetcher()
+        result = fetcher.fetch("000001", "平安银行")
+
+        assert "_error" not in result
+
+    @patch("analyst_base.get_eastmoney_announcements")
+    @patch("analyst_base.match_relevant_telegraphs")
+    @patch("analyst_base.format_telegraph_for_report")
+    def test_cls_only_no_announcements(
+        self,
+        mock_format: MagicMock,
+        mock_cls: MagicMock,
+        mock_announce: MagicMock,
+    ) -> None:
+        mock_announce.return_value = []
+        mock_cls.return_value = [{"title": "电报1"}]
+        mock_format.return_value = "格式化电报内容"
+
+        fetcher = NewsFetcher()
+        result = fetcher.fetch("000001", "平安银行")
+
+        assert result["news_source"] == "财联社电报"
+        assert "格式化电报内容" in result["news_context"]
+
+    @patch("analyst_base.get_eastmoney_announcements")
+    @patch("analyst_base.match_relevant_telegraphs")
+    @patch("quant_lab.core.data.dimensions.news.DDGS")
+    def test_ddgs_max_15_break(
+        self,
+        mock_ddgs_cls: MagicMock,
+        mock_cls: MagicMock,
+        mock_announce: MagicMock,
+    ) -> None:
+        mock_announce.return_value = []
+        mock_cls.return_value = []
+
+        mock_ddgs = MagicMock()
+        results = [
+            {"title": f"平安银行新闻{i}", "body": "内容"}
+            for i in range(20)
+        ]
+        mock_ddgs.text.return_value = results
+        mock_ddgs_cls.return_value.__enter__.return_value = mock_ddgs
+
+        fetcher = NewsFetcher()
+        result = fetcher.fetch("000001", "平安银行")
+
+        assert result["news_source"] == "全网搜索"
+
+    @patch("analyst_base.get_eastmoney_announcements")
+    @patch("analyst_base.match_relevant_telegraphs")
+    @patch("quant_lab.core.data.dimensions.news.DDGS")
+    def test_ddgs_exception(
+        self,
+        mock_ddgs_cls: MagicMock,
+        mock_cls: MagicMock,
+        mock_announce: MagicMock,
+    ) -> None:
+        mock_announce.return_value = []
+        mock_cls.return_value = []
+
+        mock_ddgs = MagicMock()
+        mock_ddgs.text.side_effect = Exception("DDGS fail")
+        mock_ddgs_cls.return_value.__enter__.return_value = mock_ddgs
+
+        fetcher = NewsFetcher()
+        result = fetcher.fetch("000001", "平安银行")
+
+        assert "_error" not in result
+
+    @patch("analyst_base.get_eastmoney_announcements")
+    @patch("analyst_base.match_relevant_telegraphs")
+    @patch("analyst_base.format_telegraph_for_report")
+    def test_cls_exception(
+        self,
+        mock_format: MagicMock,
+        mock_cls: MagicMock,
+        mock_announce: MagicMock,
+    ) -> None:
+        mock_announce.return_value = ["公告1"]
+        mock_cls.side_effect = Exception("CLS fail")
+
+        fetcher = NewsFetcher()
+        result = fetcher.fetch("000001", "平安银行")
+
+        assert "_error" not in result
+        assert result["news_source"] == "东财公告"

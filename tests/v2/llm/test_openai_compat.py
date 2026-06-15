@@ -79,6 +79,81 @@ class TestOpenAICompatibleClient:
         assert result == "自由文本 fallback"
 
 
+class TestOpenAICompatibleClientExtended:
+    def test_structured_with_limiter(self) -> None:
+        with patch("quant_lab.core.llm.openai_compat.get_limiter") as mock_limiter_fn:
+            mock_limiter = MagicMock()
+            mock_limiter_fn.return_value = mock_limiter
+            client = OpenAICompatibleClient(
+                model="test-model",
+                api_key="fake-key",
+                base_url="https://api.example.com/v1",
+                provider="test_provider",
+            )
+            mock_completion = MagicMock()
+            mock_completion.choices = [MagicMock()]
+            mock_completion.choices[0].message.parsed = MagicMock()
+
+            from quant_lab.core.schemas.stock import StockAnalysis
+            with patch.object(
+                client._client.beta.chat.completions,
+                "parse",
+                return_value=mock_completion,
+            ):
+                client.chat("test", schema=StockAnalysis)
+            mock_limiter.acquire.assert_called()
+
+    def test_structured_parsed_none_fallback(self) -> None:
+        client = OpenAICompatibleClient(
+            model="test-model",
+            api_key="fake-key",
+            base_url="https://api.example.com/v1",
+        )
+        mock_completion = MagicMock()
+        mock_completion.choices = [MagicMock()]
+        mock_completion.choices[0].message.parsed = None
+
+        mock_free = MagicMock()
+        mock_free.choices = [MagicMock()]
+        mock_free.choices[0].message.content = "free text fallback"
+
+        from quant_lab.core.schemas.stock import StockAnalysis
+        with patch.object(
+            client._client.beta.chat.completions,
+            "parse",
+            return_value=mock_completion,
+        ), patch.object(
+            client._client.chat.completions,
+            "create",
+            return_value=mock_free,
+        ):
+            result = client.chat("test", schema=StockAnalysis)
+        assert result == "free text fallback"
+
+    def test_free_text_with_limiter(self) -> None:
+        with patch("quant_lab.core.llm.openai_compat.get_limiter") as mock_limiter_fn:
+            mock_limiter = MagicMock()
+            mock_limiter_fn.return_value = mock_limiter
+            client = OpenAICompatibleClient(
+                model="test-model",
+                api_key="fake-key",
+                base_url="https://api.example.com/v1",
+                provider="test_provider",
+            )
+            mock_completion = MagicMock()
+            mock_completion.choices = [MagicMock()]
+            mock_completion.choices[0].message.content = "分析结果"
+
+            with patch.object(
+                client._client.chat.completions,
+                "create",
+                return_value=mock_completion,
+            ):
+                result = client.chat("test")
+            assert result == "分析结果"
+            mock_limiter.acquire.assert_called()
+
+
 class TestDeepSeekClient:
     """Tests for DeepSeekClient reasoning_content handling."""
 
@@ -104,3 +179,140 @@ class TestDeepSeekClient:
             result = client.chat("分析")
             assert result == "最终结论"
             mock_logger.debug.assert_called_once()
+
+
+class TestOpenAICompatibleClientV2:
+    def test_structured_with_limiter(self) -> None:
+        """Line 77: limiter acquire in structured path."""
+        with patch("quant_lab.core.llm.openai_compat.get_limiter") as mock_limiter_fn:
+            mock_limiter = MagicMock()
+            mock_limiter_fn.return_value = mock_limiter
+            client = OpenAICompatibleClient(
+                model="test-model",
+                api_key="fake-key",
+                base_url="https://api.example.com/v1",
+                provider="test_provider",
+            )
+            mock_completion = MagicMock()
+            mock_completion.choices = [MagicMock()]
+            mock_completion.choices[0].message.parsed = MagicMock()
+
+            from quant_lab.core.schemas.stock import StockAnalysis
+
+            with patch.object(
+                client._client.beta.chat.completions,
+                "parse",
+                return_value=mock_completion,
+            ):
+                client.chat("test", schema=StockAnalysis)
+            mock_limiter.acquire.assert_called()
+
+    def test_structured_parsed_none_fallback(self) -> None:
+        """Line 89: parsed is None → fallback to free text."""
+        client = OpenAICompatibleClient(
+            model="test-model",
+            api_key="fake-key",
+            base_url="https://api.example.com/v1",
+        )
+        mock_completion = MagicMock()
+        mock_completion.choices = [MagicMock()]
+        mock_completion.choices[0].message.parsed = None
+
+        mock_free = MagicMock()
+        mock_free.choices = [MagicMock()]
+        mock_free.choices[0].message.content = "free text fallback"
+
+        from quant_lab.core.schemas.stock import StockAnalysis
+
+        with patch.object(
+            client._client.beta.chat.completions,
+            "parse",
+            return_value=mock_completion,
+        ), patch.object(
+            client._client.chat.completions,
+            "create",
+            return_value=mock_free,
+        ):
+            result = client.chat("test", schema=StockAnalysis)
+        assert result == "free text fallback"
+
+    def test_free_text_with_limiter(self) -> None:
+        """Line 94: limiter acquire in free text path."""
+        with patch("quant_lab.core.llm.openai_compat.get_limiter") as mock_limiter_fn:
+            mock_limiter = MagicMock()
+            mock_limiter_fn.return_value = mock_limiter
+            client = OpenAICompatibleClient(
+                model="test-model",
+                api_key="fake-key",
+                base_url="https://api.example.com/v1",
+                provider="test_provider",
+            )
+            mock_completion = MagicMock()
+            mock_completion.choices = [MagicMock()]
+            mock_completion.choices[0].message.content = "分析结果"
+
+            with patch.object(
+                client._client.chat.completions,
+                "create",
+                return_value=mock_completion,
+            ):
+                result = client.chat("test")
+            assert result == "分析结果"
+            mock_limiter.acquire.assert_called()
+
+
+class TestDeepSeekClientV2:
+    def test_free_text_with_limiter(self) -> None:
+        """Line 118: limiter acquire in DeepSeek free text path."""
+        with patch("quant_lab.core.llm.openai_compat.get_limiter") as mock_limiter_fn:
+            mock_limiter = MagicMock()
+            mock_limiter_fn.return_value = mock_limiter
+            client = DeepSeekClient(
+                model="deepseek-r1",
+                api_key="fake-key",
+                base_url="https://api.example.com/v1",
+                provider="test_provider",
+            )
+            mock_completion = MagicMock()
+            mock_completion.choices = [MagicMock()]
+            msg = MagicMock()
+            msg.content = "最终结论"
+            msg.reasoning_content = None
+            mock_completion.choices[0].message = msg
+
+            with patch.object(
+                client._client.chat.completions,
+                "create",
+                return_value=mock_completion,
+            ):
+                result = client.chat("test")
+            assert result == "最终结论"
+            mock_limiter.acquire.assert_called()
+
+
+class TestDeepSeekClientExtended:
+    def test_free_text_with_limiter(self) -> None:
+        with patch("quant_lab.core.llm.openai_compat.get_limiter") as mock_limiter_fn:
+            mock_limiter = MagicMock()
+            mock_limiter_fn.return_value = mock_limiter
+            client = DeepSeekClient(
+                model="deepseek-r1",
+                api_key="fake-key",
+                base_url="https://api.example.com/v1",
+                provider="test_provider",
+            )
+            mock_completion = MagicMock()
+            mock_completion.choices = [MagicMock()]
+            msg = MagicMock()
+            msg.content = "最终结论"
+            msg.reasoning_content = None
+            mock_completion.choices[0].message = msg
+
+            with patch.object(
+                client._client.chat.completions,
+                "create",
+                return_value=mock_completion,
+            ):
+                result = client.chat("test")
+            assert result == "最终结论"
+            mock_limiter.acquire.assert_called()
