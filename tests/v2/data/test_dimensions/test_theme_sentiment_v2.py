@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pandas as pd  # type: ignore[import-untyped]
@@ -50,7 +50,7 @@ class TestThemeSentimentFetcherV2:
         )
         _concept_board_cache["time"] = datetime.now()
         fetcher = ThemeSentimentFetcher()
-        result = fetcher.fetch("000001", "平安银行")
+        fetcher.fetch("000001", "平安银行")
         mock_ak.stock_board_concept_name_em.assert_not_called()
 
     @patch("quant_lab.core.data.dimensions.theme_sentiment.ak")

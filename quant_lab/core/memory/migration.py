@@ -56,7 +56,7 @@ def _parse_report_file(path: str) -> dict[str, Any] | None:
 
     # Read content
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             content = f.read()
     except Exception as exc:
         logger.warning("Cannot read %s: %s", path, exc)
@@ -114,7 +114,7 @@ def run_migration(dry_run: bool = False) -> dict[str, Any]:
         Statistics dict with ``total``, ``imported``, ``skipped``, ``errors``.
     """
     log = AnalysisMemoryLog()
-    stats = {"total": 0, "imported": 0, "skipped": 0, "errors": 0, "details": []}
+    stats: dict[str, Any] = {"total": 0, "imported": 0, "skipped": 0, "errors": 0, "details": []}
 
     if not os.path.isdir(REPORT_ROOT):
         logger.warning("Report directory not found: %s", REPORT_ROOT)

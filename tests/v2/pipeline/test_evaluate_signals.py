@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+from quant_lab.core.pipeline.state import AnalysisState
 from quant_lab.core.pipeline.steps.evaluate_signals import (
     EvaluateSignalsStep,
     _evaluate_signals,
     _extract_amount,
 )
-from quant_lab.core.pipeline.state import AnalysisState
 
 
 class TestExtractAmount:
@@ -94,7 +94,7 @@ class TestValuationSignals:
         assert score >= 3
         assert any("估值错位" in t for t in triggers)
 
-    def test_extreme低估(self) -> None:
+    def test_extreme_undervalued(self) -> None:
         data = {
             "pe_ttm": "8",
             "pb": "0.8",
@@ -105,7 +105,7 @@ class TestValuationSignals:
         assert score >= 3
         assert any("极度低估" in t for t in triggers)
 
-    def test_high估_warning(self) -> None:
+    def test_high_valuation_warning(self) -> None:
         data = {
             "pe_ttm": "80",
             "pb": "12",

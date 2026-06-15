@@ -97,7 +97,7 @@ def _infer_asset_type(item: dict) -> str | None:
     return None  # let caller detect
 
 
-def _select_builder(analysis_mode: str):
+def _select_builder(analysis_mode: str) -> Any:
     """Return the appropriate builder for *analysis_mode*."""
     if analysis_mode == "deep":
         return build_deep_pipeline
@@ -292,14 +292,14 @@ def run_v2_monitor_mode(
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_map = {}
         for idx, (code, (item, data)) in enumerate(fetched_map.items()):
-            future = executor.submit(_analyze_one, code, item, data)
+            future = executor.submit(_analyze_one, code, item, data)  # type: ignore[arg-type]
             future_map[future] = code
             print(f"  [→ 提交 {idx+1}/{ai_total}] {item['name']}")
 
         for future in as_completed(future_map):
             code = future_map[future]
             try:
-                item, data, response, is_deep = future.result()
+                item, data, response, is_deep = future.result()  # type: ignore[misc]
                 ai_results[code] = (item, data, response, is_deep)
             except Exception as exc:
                 logger.error("AI 分析失败 %s: %s", code, exc)

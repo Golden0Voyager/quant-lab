@@ -37,7 +37,7 @@ class TestChipFetcherExtended:
             result = fetcher.fetch("000001", "平安银行")
             assert result["chip_signal"] == "套牢盘较重，下方有支撑"
 
-    def test_profit_ratio均衡(self) -> None:
+    def test_profit_ratio_balanced(self) -> None:
         with patch("quant_lab.core.data.dimensions.chip.ak") as mock_ak:
             mock_ak.stock_cyq_em.return_value = pd.DataFrame(
                 {"获利比例": [35.0], "平均成本": [25.0]}
