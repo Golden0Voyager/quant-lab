@@ -75,3 +75,15 @@ class TestTopHoldersFetcher:
 
         assert "_error" in result
         assert result["_dimension"] == "top_holders"
+
+    @patch("quant_lab.core.data.dimensions.top_holders.fetch_circulate_holders")
+    def test_empty_dates(self, mock_fetch: MagicMock) -> None:
+        mock_fetch.return_value = {
+            "df": pd.DataFrame({"截止日期": pd.Series([], dtype=str)})
+        }
+
+        fetcher = TopHoldersFetcher()
+        result = fetcher.fetch("000001", "平安银行")
+
+        assert "_error" in result
+        assert "无截止日期数据" in result["_error"]

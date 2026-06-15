@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -55,3 +55,30 @@ class TestCreateClient:
         with patch.dict("os.environ", {}, clear=True):
             create_client("modelscope", "deepseek-ai/DeepSeek-V3.2")
         assert "API key not found" in caplog.text
+
+    def test_unsupported_model(self) -> None:
+        """Line 46: model not in catalog → ValueError."""
+        with pytest.raises(ValueError, match="Unsupported model"):
+            create_client("modelscope", model="nonexistent-model-xyz")
+
+    def test_unsupported_provider(self) -> None:
+        """Line 86: unknown provider → ValueError."""
+        # Need a valid model first, then the provider check comes after
+        # Model must exist in catalog but belong to different provider
+        with patch("quant_lab.core.llm.factory.ModelCatalog") as mock_catalog:
+            mock_info = MagicMock()
+            mock_info.provider = "wrong_provider"
+            mock_catalog.lookup.return_value = mock_info
+            mock_catalog.default_model_for_provider.return_value = "test-model"
+            with pytest.raises(ValueError, match="Unsupported provider|belongs to provider"):
+                create_client("unknown_provider", model="test-model")
+
+    def test_provider_mismatch(self) -> None:
+        with pytest.raises(ValueError, match="belongs to provider"):
+            create_client("modelscope", model="claude-sonnet-4-6-20251101")
+
+    def test_anthropic_provider(self) -> None:
+        with patch("quant_lab.core.llm.factory.AnthropicClient") as mock_cls:
+            mock_cls.return_value = MagicMock()
+            create_client("anthropic", model="claude-sonnet-4-6-20251101")
+            mock_cls.assert_called_once()

@@ -78,7 +78,6 @@ class TestAnalysisMemoryLog:
         assert record["alpha_return"] == 0.02
         assert record["reflection"] == "判断正确，资金持续流入"
 
-        # Should no longer appear in pending
         pending = log.get_pending_entries()
         assert len(pending) == 0
 
@@ -87,7 +86,6 @@ class TestAnalysisMemoryLog:
         assert result is None
 
     def test_past_context(self, log: AnalysisMemoryLog) -> None:
-        # Store and resolve a decision
         eid = log.store_decision(
             symbol="000001", stock_name="平安银行", date="2026-05-20",
             rating="买入", confidence=0.8, triggers=["资金流入"],
@@ -131,3 +129,21 @@ class TestAnalysisMemoryLog:
         assert stats["pending"] == 2
         assert stats["resolved"] == 0
         assert stats["symbols"] == 2
+
+    def test_resolve_with_outcome_not_found(self, tmp_path: object) -> None:
+        log = AnalysisMemoryLog(db_path=os.path.join(str(tmp_path), "test.db"))
+        result = log.resolve_with_outcome("99999", 0.1, 0.05)
+        assert result is None
+
+    def test_get_stats_empty(self, tmp_path: object) -> None:
+        log = AnalysisMemoryLog(db_path=os.path.join(str(tmp_path), "test.db"))
+        stats = log.get_stats()
+        assert "total" in stats
+        assert "pending" in stats
+        assert "resolved" in stats
+        assert "symbols" in stats
+
+    def test_get_past_context_empty_v2(self, tmp_path: object) -> None:
+        log = AnalysisMemoryLog(db_path=os.path.join(str(tmp_path), "test.db"))
+        result = log.get_past_context("000001")
+        assert isinstance(result, str)
