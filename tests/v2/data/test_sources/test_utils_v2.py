@@ -5,8 +5,6 @@ from __future__ import annotations
 import os
 from unittest.mock import patch
 
-import pandas as pd  # type: ignore[import-untyped]
-
 from quant_lab.core.data.sources._utils import no_proxy, safe_float
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from unittest.mock import MagicMock, patch
 
 import pandas as pd  # type: ignore[import-untyped]
@@ -30,10 +31,15 @@ class TestMarketEnvFetcher:
         ):
             cache["data"] = None
             cache["time"] = None
+        self._orig_xq_token = os.environ.get("XUEQIU_TOKEN")
 
     def teardown_method(self) -> None:
         for key, val in self._orig_caches.items():
             getattr(market_env, key).update(val)
+        if self._orig_xq_token is None:
+            os.environ.pop("XUEQIU_TOKEN", None)
+        else:
+            os.environ["XUEQIU_TOKEN"] = self._orig_xq_token
 
     @patch("quant_lab.core.data.dimensions.market_env.ak")
     @patch("quant_lab.core.data.dimensions.market_env._get_industry")
@@ -207,6 +213,7 @@ class TestMarketEnvFetcher:
         mock_ak.stock_individual_spot_xq.return_value = pd.DataFrame(
             {"item": ["成交额"], "value": ["15000000000000"]}
         )
+        os.environ["XUEQIU_TOKEN"] = "test_token"
         mock_ak.stock_market_activity_legu.return_value = pd.DataFrame(
             {"item": [], "value": []}
         )

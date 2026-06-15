@@ -9,8 +9,8 @@ import pandas as pd  # type: ignore[import-untyped]
 
 from quant_lab.core.data.sources.eastmoney import (
     fetch_financial_report,
-    fetch_stock_info_eastmoney,
     fetch_profit_sheet,
+    fetch_stock_info_eastmoney,
 )
 
 

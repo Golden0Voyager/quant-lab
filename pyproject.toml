@@ -32,7 +32,12 @@ dev = [
 ]
 
 [tool.ruff]
-extend = "~/.config/ruff/ruff.toml"
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B"]
+ignore = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -40,6 +45,15 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 files = ["quant_lab/core/"]
+exclude = [
+    "data_cache\\.py$",
+    "md2pdf_tool\\.py$",
+    "analyst_.*\\.py$",
+    "ai_config\\.py$",
+    "main\\.py$",
+    "valuation_analyzer\\.py$",
+    "stock_finder\\.py$",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
