@@ -65,6 +65,10 @@ watchlists.json
 # Worktrees
 .worktrees/
 
+# Coverage
+.coverage
+htmlcov/
+
 # AI 工具本地配置
 .claude/settings.local.json
 .gemini/
