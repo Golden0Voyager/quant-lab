@@ -27,20 +27,15 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
     "ruff>=0.7.0",
     "mypy>=1.13.0",
 ]
 
 [tool.ruff]
-target-version = "py312"
-line-length = 120
-
-[tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "B"]
-ignore = ["E501"]
+extend = "~/.config/ruff/ruff.toml"
 
 [tool.mypy]
-python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -58,3 +53,10 @@ exclude = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests/v2"]
+
+[tool.coverage.run]
+source = ["quant_lab"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
