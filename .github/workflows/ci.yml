@@ -27,5 +27,8 @@ jobs:
       - name: Type check
         run: uv run mypy quant_lab/core/ 2>&1 | grep -E "^quant_lab/core/|Found.*errors" || true
 
-      - name: Test
-        run: uv run pytest tests/v2/ -q
+      - name: Test with coverage
+        run: uv run pytest tests/v2/ --cov --cov-report=term-missing -q
+
+      - name: Enforce coverage threshold
+        run: uv run coverage report
