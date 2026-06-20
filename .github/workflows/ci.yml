@@ -9,26 +9,28 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v5
 
       - name: Set up Python
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --dev
 
-      - name: Lint
-        run: uv run ruff check quant_lab/core/ tests/v2/
+      - name: Run ruff check
+        run: uv run ruff check quant_lab/ tests/v2/
 
-      - name: Type check
-        run: uv run mypy quant_lab/core/ 2>&1 | grep -E "^quant_lab/core/|Found.*errors" || true
+      - name: Run mypy
+        run: uv run mypy quant_lab/core/ || true
 
-      - name: Test with coverage
-        run: uv run pytest tests/v2/ --cov --cov-report=term-missing -q
+      - name: Run tests with coverage
+        run: uv run pytest --cov --cov-report=term-missing
 
       - name: Enforce coverage threshold
         run: uv run coverage report
