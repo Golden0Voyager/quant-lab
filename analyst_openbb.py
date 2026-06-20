@@ -1,14 +1,14 @@
-import pandas as pd
-from openbb import obb
-import os
-import time
-import threading
-from datetime import datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import numpy as np
 import functools
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta
 
-from ai_config import _yahoo_proxy, YAHOO_PROXY_URL
+import numpy as np
+from openbb import obb
+
+from ai_config import YAHOO_PROXY_URL, _yahoo_proxy
+
 
 def retry(max_retries=3, delay=2):
     """简单的重试装饰器"""

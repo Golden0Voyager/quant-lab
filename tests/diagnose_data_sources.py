@@ -4,11 +4,10 @@
 """
 
 import logging
+from typing import Any
+
 import akshare as ak
 import pandas as pd
-from typing import Optional, Dict, Any, Tuple
-from datetime import datetime
-import time
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +32,7 @@ class DataSourceManager:
             'cached': {'success': 0, 'fail': 0}
         }
 
-    def get_valuation_data(self, symbol: str, stock_name: str) -> Tuple[Dict[str, Any], str]:
+    def get_valuation_data(self, symbol: str, stock_name: str) -> tuple[dict[str, Any], str]:
         """
         获取估值数据（PE/PB/PS/股息率）
 
@@ -65,10 +64,10 @@ class DataSourceManager:
                 continue
 
         # 所有数据源失败，返回空壳数据
-        logger.error(f"❌ 所有数据源均失败，返回降级数据")
+        logger.error("❌ 所有数据源均失败，返回降级数据")
         return self._get_fallback_data(), "fallback"
 
-    def _fetch_from_eastmoney_spot(self, symbol: str, stock_name: str) -> Dict[str, Any]:
+    def _fetch_from_eastmoney_spot(self, symbol: str, stock_name: str) -> dict[str, Any]:
         """
         方案1：东方财富个股实时行情（快速但不含估值）+ 单独查询估值
         """
@@ -78,7 +77,7 @@ class DataSourceManager:
         info_df = ak.stock_individual_info_em(symbol=symbol)
         if not info_df.empty:
             info_dict = dict(zip(info_df['item'], info_df['value']))
-            market_cap = info_dict.get('总市值', None)
+            market_cap = info_dict.get('总市值')
             if market_cap:
                 data['market_cap'] = float(market_cap)
                 data['market_cap_display'] = f"{float(market_cap)/1e8:.0f}亿"
@@ -161,7 +160,7 @@ class DataSourceManager:
 
         return data
 
-    def _fetch_from_sina(self, symbol: str, stock_name: str) -> Dict[str, Any]:
+    def _fetch_from_sina(self, symbol: str, stock_name: str) -> dict[str, Any]:
         """
         方案2：新浪财经API（备用）
         """
@@ -209,7 +208,7 @@ class DataSourceManager:
 
         return data
 
-    def _validate_valuation_data(self, data: Dict[str, Any]) -> bool:
+    def _validate_valuation_data(self, data: dict[str, Any]) -> bool:
         """
         验证估值数据完整性
 
@@ -225,7 +224,7 @@ class DataSourceManager:
         # 至少有一个估值指标有效
         return has_pe or has_pb or has_dividend
 
-    def _get_fallback_data(self) -> Dict[str, Any]:
+    def _get_fallback_data(self) -> dict[str, Any]:
         """
         降级数据：所有数据源失败时返回
         """
@@ -256,7 +255,7 @@ class DataSourceManager:
         if source_name in self.source_stats:
             self.source_stats[source_name]['fail'] += 1
 
-    def get_success_rates(self) -> Dict[str, float]:
+    def get_success_rates(self) -> dict[str, float]:
         """
         获取各数据源成功率
 

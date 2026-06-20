@@ -4,10 +4,12 @@
 支持市场：A股、港股
 """
 
-import akshare as ak
 import json
 import os
 from datetime import datetime, timedelta
+
+import akshare as ak
+
 
 class StockFinder:
     """股票查询工具类"""
@@ -24,17 +26,17 @@ class StockFinder:
         self.hk_cache_file = cache_file.replace('.json', '_hk.json')
         self.etf_cache_file = cache_file.replace('.json', '_etf.json')
         self.fund_cache_file = cache_file.replace('.json', '_fund.json')
-        
+
         self.stock_list = None  # A股列表
         self.hk_stock_list = None  # 港股列表
         self.etf_list = None  # ETF列表
         self.fund_list = None  # 场外基金列表
-        
+
         self.include_hk = include_hk
         self._load_or_fetch_stock_list()
         self._load_or_fetch_etf_list()
         self._load_or_fetch_fund_list()
-        
+
         # 港股列表改为懒加载，仅在实际需要时获取
         self._hk_loaded = False
 
@@ -42,7 +44,7 @@ class StockFinder:
         """加载或获取股票列表"""
         # 尝试从缓存加载
         if os.path.exists(self.cache_file):
-            with open(self.cache_file, 'r', encoding='utf-8') as f:
+            with open(self.cache_file, encoding='utf-8') as f:
                 cache_data = json.load(f)
                 cache_date = datetime.fromisoformat(cache_data['date'])
 
@@ -98,7 +100,7 @@ class StockFinder:
         """加载过期缓存作为备用（网络失败时）"""
         if os.path.exists(self.cache_file):
             try:
-                with open(self.cache_file, 'r', encoding='utf-8') as f:
+                with open(self.cache_file, encoding='utf-8') as f:
                     cache_data = json.load(f)
                     self.stock_list = cache_data['data']
                     cache_date = datetime.fromisoformat(cache_data['date'])
@@ -111,7 +113,7 @@ class StockFinder:
     def _load_or_fetch_etf_list(self):
         """加载或获取 ETF 列表"""
         if os.path.exists(self.etf_cache_file):
-            with open(self.etf_cache_file, 'r', encoding='utf-8') as f:
+            with open(self.etf_cache_file, encoding='utf-8') as f:
                 cache_data = json.load(f)
                 cache_date = datetime.fromisoformat(cache_data['date'])
                 if datetime.now() - cache_date < timedelta(days=7):
@@ -169,7 +171,7 @@ class StockFinder:
     def _load_or_fetch_fund_list(self):
         """加载或获取场外基金列表"""
         if os.path.exists(self.fund_cache_file):
-            with open(self.fund_cache_file, 'r', encoding='utf-8') as f:
+            with open(self.fund_cache_file, encoding='utf-8') as f:
                 cache_data = json.load(f)
                 cache_date = datetime.fromisoformat(cache_data['date'])
                 if datetime.now() - cache_date < timedelta(days=7):
@@ -221,7 +223,7 @@ class StockFinder:
         # 尝试从缓存加载
         if os.path.exists(self.hk_cache_file):
             try:
-                with open(self.hk_cache_file, 'r', encoding='utf-8') as f:
+                with open(self.hk_cache_file, encoding='utf-8') as f:
                     cache_data = json.load(f)
                     cache_date = datetime.fromisoformat(cache_data['date'])
 
@@ -290,7 +292,7 @@ class StockFinder:
         """通用的过期缓存加载（网络失败时的兜底）"""
         if os.path.exists(cache_file):
             try:
-                with open(cache_file, 'r', encoding='utf-8') as f:
+                with open(cache_file, encoding='utf-8') as f:
                     cache_data = json.load(f)
                     setattr(self, attr_name, cache_data['data'])
                     cache_date = datetime.fromisoformat(cache_data['date'])
@@ -304,7 +306,7 @@ class StockFinder:
         """加载过期的港股缓存作为备用"""
         if os.path.exists(self.hk_cache_file):
             try:
-                with open(self.hk_cache_file, 'r', encoding='utf-8') as f:
+                with open(self.hk_cache_file, encoding='utf-8') as f:
                     cache_data = json.load(f)
                     self.hk_stock_list = cache_data['data']
                     cache_date = datetime.fromisoformat(cache_data['date'])
@@ -334,7 +336,7 @@ class StockFinder:
 
         # --- 1. 构建搜索全集 (按优先级排序) ---
         search_list = []
-        
+
         # A股 (标记 asset_type)
         for s in self.stock_list:
             item = s.copy()
@@ -347,7 +349,7 @@ class StockFinder:
         if self.include_hk and not self._hk_loaded and is_hk_query:
             self._load_or_fetch_hk_stock_list()
             self._hk_loaded = True
-        
+
         if self.include_hk and self.hk_stock_list:
             for s in self.hk_stock_list:
                 item = s.copy()
@@ -378,7 +380,7 @@ class StockFinder:
         # --- 3. 智能模糊匹配 ---
         clean_query = query.replace(' ', '').upper()
         matches = []
-        
+
         for item in search_list:
             clean_name = item['name'].upper()
             # 移除常见前缀以增强匹配
@@ -386,10 +388,8 @@ class StockFinder:
                 if clean_name.startswith(prefix):
                     clean_name = clean_name[len(prefix):]
                     break
-            
-            if clean_query in clean_name or clean_query in item['code']:
-                matches.append(item)
-            elif clean_name in clean_query:
+
+            if clean_query in clean_name or clean_query in item['code'] or clean_name in clean_query:
                 matches.append(item)
 
         if len(matches) == 1:
@@ -404,7 +404,7 @@ class StockFinder:
                     unique_matches.append(m)
                     seen.add(key)
             return unique_matches if len(unique_matches) > 1 else unique_matches[0]
-        
+
         return None
 
     def format_matches(self, matches):
@@ -426,13 +426,13 @@ def smart_stock_query(query):
     智能标的查询（便捷函数）
     """
     finder = StockFinder()
-    
+
     # 检测是否为美股代码（纯ASCII字母，或带.的纯ASCII字母如 BRK.B）
     is_us = query.isascii() and (query.isalpha() or ('.' in query and query.replace('.', '').isalpha()))
     if is_us:
         print(f"✅ 探测到: [美股代码] {query}")
         return query, query, 'US', 'stock'
-        
+
     result = finder.find(query)
 
     if result is None:

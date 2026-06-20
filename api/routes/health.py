@@ -3,9 +3,10 @@
 用于监控服务状态
 """
 
-from flask import Blueprint, jsonify
-from datetime import datetime
 import sys
+from datetime import datetime
+
+from flask import Blueprint, jsonify
 
 bp = Blueprint('health', __name__)
 

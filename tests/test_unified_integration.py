@@ -1,7 +1,7 @@
+import logging
 import os
 import sys
 import time
-import logging
 
 # 确保能找到根目录模块
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 def test_unified_api():
     symbol = "600519"
     name = "贵州茅台"
-    
+
     print("\n🚀 开始测试统一集成入口: %s (%s)" % (name, symbol))
     print("="*60)
 

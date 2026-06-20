@@ -1,9 +1,10 @@
 """
 简单的API测试脚本
 """
-import sys
 import os
+import sys
 import time
+
 import requests
 
 # 添加项目根目录到路径
@@ -11,8 +12,10 @@ sys.path.insert(0, '/Users/hainingyu/Code/quant_lab')
 os.chdir('/Users/hainingyu/Code/quant_lab')
 
 # 启动Flask应用
-from api.app import app
 from threading import Thread
+
+from api.app import app
+
 
 def run_app():
     app.run(host='0.0.0.0', port=5002, debug=False, use_reloader=False)
@@ -31,7 +34,7 @@ print("=" * 60)
 # 测试health接口
 try:
     response = requests.get('http://localhost:5002/health')
-    print(f"\n✅ /health 接口测试:")
+    print("\n✅ /health 接口测试:")
     print(f"   状态码: {response.status_code}")
     print(f"   响应: {response.json()}")
 except Exception as e:
@@ -40,7 +43,7 @@ except Exception as e:
 # 测试ping接口
 try:
     response = requests.get('http://localhost:5002/ping')
-    print(f"\n✅ /ping 接口测试:")
+    print("\n✅ /ping 接口测试:")
     print(f"   状态码: {response.status_code}")
     print(f"   响应: {response.json()}")
 except Exception as e:

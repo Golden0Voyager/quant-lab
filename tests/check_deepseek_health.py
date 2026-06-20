@@ -11,6 +11,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import time
+
 from openai import OpenAI
 
 # 颜色代码
@@ -66,13 +67,13 @@ def check_network():
         # 尝试连接
         sock = socket.create_connection((host, 443), timeout=5)
         sock.close()
-        print_status("success", f"网络连接正常")
+        print_status("success", "网络连接正常")
         return True
 
     except socket.gaierror:
         print_status("error", "DNS 解析失败")
         return False
-    except socket.timeout:
+    except TimeoutError:
         print_status("error", "连接超时")
         return False
     except Exception as e:
@@ -95,7 +96,7 @@ def test_api_call(api_key, timeout=30):
     test_prompt = "请用一句话介绍你自己"
 
     try:
-        print_status("info", f"正在调用 qwen-plus 模型...")
+        print_status("info", "正在调用 qwen-plus 模型...")
         start_time = time.time()
 
         completion = client.chat.completions.create(
@@ -179,7 +180,7 @@ def check_timeout_settings():
     print("="*60)
 
     try:
-        with open('main.py', 'r', encoding='utf-8') as f:
+        with open('main.py', encoding='utf-8') as f:
             content = f.read()
 
             # 查找 call_ai 函数中的超时设置

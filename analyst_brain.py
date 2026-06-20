@@ -9,15 +9,12 @@
 5. 支持多版本Prompt (value_first/quant_hybrid/professional)
 """
 
-import os
-import time
 import logging
 import re
-from datetime import datetime, timedelta
+import time
 
 # 引入统一配置中心
 import ai_config
-from openai import OpenAI
 
 # 导入新的 Prompt 构建函数
 from analyst_integration import build_enhanced_prompt
@@ -38,12 +35,12 @@ class AnalystBrain:
         """
         # 如果未指定模型，从统一配置获取
         self.model = model or ai_config.get_primary_model_name()
-        
+
         # 获取备用模型（用于重试）
         self.backup_model = ai_config.get_backup_model_name()
-        
+
         self.prompt_version = prompt_version
-        
+
         # 使用统一工厂创建客户端
         self.client = ai_config.create_openai_client(timeout=180.0)
 
@@ -341,7 +338,7 @@ class AnalystBrain:
                     logger.info(f"⚠️ 切换到备用模型: {model_name} ...")
 
                 logger.info(f"⏳ 调用 {model_name} (尝试 {attempt_idx})...")
-                
+
                 completion = self.client.chat.completions.create(
                     model=model_name,
                     messages=[

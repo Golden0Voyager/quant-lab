@@ -1,27 +1,25 @@
-import os
-import sys
-import time
-import logging
-import json
-import threading
 import argparse
-import markdown
-from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import select
+import json
+import logging
+import os
 import re
-from typing import List, Tuple, Optional
+import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 
 # 引入统一 AI 配置与网络优化
 import ai_config
+
 ai_config.init_global_network()
 
 # === 使用带缓存的四维数据抓取（性能提升100倍+） ===
-from analyst_integration import fetch_stock_data, fetch_integrated_data, detect_asset_type, build_enhanced_prompt
 from analyst_brain import AnalystBrain
-from stock_finder import smart_stock_query, StockFinder
-from valuation_analyzer import ValuationAnalyzer
+from analyst_integration import build_enhanced_prompt, detect_asset_type, fetch_integrated_data, fetch_stock_data
 from md2pdf_tool import md_to_pdf
+from stock_finder import StockFinder, smart_stock_query
+from valuation_analyzer import ValuationAnalyzer
 
 # 配置日志
 logging.basicConfig(
@@ -78,7 +76,7 @@ def load_watchlists():
 
     try:
         if os.path.exists(config_file):
-            with open(config_file, 'r', encoding='utf-8') as f:
+            with open(config_file, encoding='utf-8') as f:
                 config = json.load(f)
 
             watchlists = {}
@@ -91,7 +89,7 @@ def load_watchlists():
                 else:
                     watchlists[key] = default_watchlists[key]
 
-            logging.info(f"✅ 自选股配置已从 watchlists.json 加载")
+            logging.info("✅ 自选股配置已从 watchlists.json 加载")
             return watchlists
     except Exception as e:
         logging.warning(f"⚠️ 配置文件加载失败，使用默认列表: {e}")
@@ -160,10 +158,10 @@ def call_ai(prompt, model=None):
     current_model = model if model else ai_config.get_primary_model_name()
     backup_model = ai_config.get_backup_model_name()
     attempts_plan = [(current_model, 1), (current_model, 2), (backup_model, 1), (backup_model, 2)]
-    
+
     client = ai_config.create_openai_client(timeout=180.0)
     last_error = None
-    
+
     for model_name, attempt_idx in attempts_plan:
         try:
             logging.info(f"正在调用 {model_name} (尝试 {attempt_idx})...")
@@ -208,7 +206,7 @@ def run_global_stock_mode(ticker):
     prompt = analyst.build_global_prompt({**stock_data, 'macro': macro or {}})
 
     # 4. 调用 AI 分析
-    print(f"\n🤖 正在调用 AI 分析...\n")
+    print("\n🤖 正在调用 AI 分析...\n")
     try:
         summary = call_ai(prompt)
         analysis_label = "🌍 Global 全球分析"
@@ -237,7 +235,7 @@ def run_global_stock_mode(ticker):
             f.write(f"# {stock_name}（{ticker}）全球市场分析\n\n")
             f.write(f"> 生成时间: {now.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
             f.write(f"> 分析模式: {analysis_label}\n\n")
-            f.write(f"## 数据概览\n\n")
+            f.write("## 数据概览\n\n")
             f.write(f"- **技术面**: {stock_data.get('tech_summary', 'N/A')}\n")
             f.write(f"- **基本面**: {stock_data.get('fundamental_summary', 'N/A')}\n")
             if macro:
@@ -315,7 +313,7 @@ def run_single_stock_mode(stock_code, stock_name=None, analysis_mode="auto", pro
     try:
         if use_deep_analysis and brain:
             print(f"🧠 触发深度分析 (评分{signal_score}分): {', '.join(trigger_reasons)}")
-            print(f"⏳ AI深度分析中，请稍候...\n")
+            print("⏳ AI深度分析中，请稍候...\n")
             summary = brain.deep_analyze_stock(data)
             analysis_label = "🧠 Brain 深度分析"
         else:
@@ -373,7 +371,7 @@ def run_monitor_mode(watchlist_name="my", analysis_mode="fast", prompt_version="
 
     now = datetime.now()
     report_content = f"# 每日投资报告（{now.strftime('%Y-%m-%d')}）\n\n> 本报告由AI自动生成，仅供参考。\n\n"
-    
+
     stock_data_map = {}
     total = len(watchlist)
     print(f"📊 数据获取中 (共{total}只)...")
@@ -516,7 +514,7 @@ class StockListParser:
     def __init__(self):
         self.finder = StockFinder()
 
-    def parse_text(self, text: str) -> List[Tuple[str, str]]:
+    def parse_text(self, text: str) -> list[tuple[str, str]]:
         """
         解析包含股票信息的文本，提取股票代码和名称
 
@@ -566,10 +564,10 @@ class StockListParser:
 
         return stocks
 
-    def parse_file(self, file_path: str) -> List[Tuple[str, str]]:
+    def parse_file(self, file_path: str) -> list[tuple[str, str]]:
         """从文件解析股票清单"""
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, encoding='utf-8') as f:
                 text = f.read()
             return self.parse_text(text)
         except Exception as e:
@@ -585,7 +583,7 @@ class BatchValuationAnalyzer:
         self.call_ai = call_ai_func
         self.model = model or ai_config.get_primary_model_name()
 
-    def analyze_batch(self, stocks: List[Tuple[str, str]], output_dir: Optional[str] = None, delay: float = 2.0) -> dict:
+    def analyze_batch(self, stocks: list[tuple[str, str]], output_dir: str | None = None, delay: float = 2.0) -> dict:
         """批量分析股票列表"""
         if output_dir is None:
             script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -596,7 +594,7 @@ class BatchValuationAnalyzer:
         stats = {'total': len(stocks), 'success': 0, 'failed': 0, 'failed_list': []}
 
         print(f"\n{'='*60}")
-        print(f"📊 批量估值分析模式")
+        print("📊 批量估值分析模式")
         print(f"📅 日期: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"📝 任务数: {len(stocks)} 只股票")
         print(f"📁 输出目录: {output_dir}")
@@ -607,7 +605,7 @@ class BatchValuationAnalyzer:
             print("-" * 60)
 
             try:
-                print(f"📊 获取估值数据...")
+                print("📊 获取估值数据...")
                 metrics, summary = self.analyzer.analyze(stock_code, stock_name)
 
                 print(f"🧠 调用 {self.model} 进行深度分析...")
@@ -640,13 +638,13 @@ class BatchValuationAnalyzer:
                 print(f"❌ 分析失败: {e}")
 
         print(f"\n{'='*60}")
-        print(f"📊 批量分析完成")
+        print("📊 批量分析完成")
         print(f"{'='*60}")
         print(f"✅ 成功: {stats['success']}/{stats['total']}")
         print(f"❌ 失败: {stats['failed']}/{stats['total']}")
 
         if stats['failed_list']:
-            print(f"\n失败列表:")
+            print("\n失败列表:")
             for code, name, error in stats['failed_list']:
                 print(f"  - {name} ({code}): {error[:50]}")
 
@@ -664,7 +662,7 @@ def run_batch_valuation(input_source: str, call_ai_func, model: str = None, dela
         print(f"📄 从文件解析股票清单: {input_source}")
         stocks = parser.parse_file(input_source)
     else:
-        print(f"📝 从文本解析股票清单")
+        print("📝 从文本解析股票清单")
         stocks = parser.parse_text(input_source)
 
     if not stocks:
@@ -694,7 +692,7 @@ def run_batch_valuation(input_source: str, call_ai_func, model: str = None, dela
 # ============================================================
 def run_warm_cache(list_name: str = "my"):
     """预热自选股缓存"""
-    from analyst_cache import warm_up_cache, get_cache_info
+    from analyst_cache import get_cache_info, warm_up_cache
 
     lists = {
         "my": ("My Watchlist", MY_WATCHLIST),
@@ -756,7 +754,7 @@ if __name__ == "__main__":
 
     # ── v2 pipeline 路由 ──────────────────────────────────────────────
     if args.v2:
-        from quant_lab.core.cli import run_v2_single_stock, run_v2_monitor_mode
+        from quant_lab.core.cli import run_v2_monitor_mode, run_v2_single_stock
 
         if args.stock:
             code, name = args.stock.split(':', 1) if ':' in args.stock else (args.stock, None)
@@ -791,11 +789,11 @@ if __name__ == "__main__":
         if code:
             if asset_type in ['fund', 'etf']:
                 print(f"\n{'='*60}\n📊 {asset_type.upper()}快速分析: {name} ({code})\n{'='*60}")
-                from analyst_integration import fetch_integrated_data, build_enhanced_prompt
+                from analyst_integration import build_enhanced_prompt, fetch_integrated_data
                 data = fetch_integrated_data(code, name, asset_type=asset_type, use_cache=False)
                 from analyst_fund import FundAnalyst
                 summary = FundAnalyst().get_report_context(data)
-                
+
                 health_score = data.get('portfolio_health_score')
                 if health_score is not None:
                     summary += f"\n- **重仓股实时平均健康分**: {health_score}/10"
@@ -803,10 +801,9 @@ if __name__ == "__main__":
                     summary += f"\n- **重仓股加权隐含 PE-TTM**: {data.get('portfolio_pe'):.2f}"
                 if data.get('portfolio_pb'):
                     summary += f"\n- **重仓股加权隐含 PB**: {data.get('portfolio_pb'):.2f}"
-                
+
                 print(summary)
-                
-                from analyst_integration import build_enhanced_prompt
+
                 ai_prompt = build_enhanced_prompt(data, analysis_type="worker")
             else:
                 va = ValuationAnalyzer()

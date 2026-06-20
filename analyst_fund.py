@@ -1,10 +1,11 @@
-import akshare as ak
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
 import logging
-from analyst_base import BaseAnalyst, retry_on_failure, _to_xq_symbol
-import os
+
+import akshare as ak
+import numpy as np
+import pandas as pd
+
+from analyst_base import BaseAnalyst, _to_xq_symbol, retry_on_failure
+
 
 class FundAnalyst(BaseAnalyst):
     """
@@ -42,10 +43,10 @@ class FundAnalyst(BaseAnalyst):
         if nav_df is not None and not nav_df.empty:
             data['metrics'] = self._calculate_pro_metrics(nav_df)
             data['nav_data'] = nav_df.tail(20).to_dict('records')
-        
+
         # 3. 持仓穿透 (核心竞争力)
         data['portfolio'] = self._fetch_portfolio_penetration(symbol)
-        
+
         # 4. 阶段表现
         data['performance'] = self._fetch_stage_performance(symbol)
 
@@ -87,19 +88,19 @@ class FundAnalyst(BaseAnalyst):
             total_return = (df['收盘'].iloc[-1] / df['收盘'].iloc[0]) - 1
             days = (df['date'].iloc[-1] - df['date'].iloc[0]).days
             annual_return = (1 + total_return) ** (365 / max(days, 1)) - 1
-            
+
             # 年化波动率
             annual_vol = returns.std() * np.sqrt(252)
-            
+
             # 夏普比率
             sharpe = (annual_return - self.risk_free_rate) / annual_vol if annual_vol > 0 else 0
-            
+
             # 最大回撤
             cumulative_returns = (1 + returns).cumprod()
             peak = cumulative_returns.cummax()
             drawdown = (cumulative_returns - peak) / peak
             max_dd = drawdown.min()
-            
+
             # 卡玛比率
             calmar = annual_return / abs(max_dd) if max_dd != 0 else 0
 
@@ -121,7 +122,7 @@ class FundAnalyst(BaseAnalyst):
             if df_portfolio is not None and not df_portfolio.empty:
                 code_col = '股票代码' if '股票代码' in df_portfolio.columns else '代码'
                 name_col = '股票名称' if '股票名称' in df_portfolio.columns else '名称'
-                
+
                 top_10 = df_portfolio.head(10).copy()
                 holdings = []
                 for _, row in top_10.iterrows():
@@ -166,7 +167,7 @@ class FundAnalyst(BaseAnalyst):
         metrics = data.get('metrics', {})
         perf = data.get('performance', {})
         portfolio = data.get('portfolio', [])
-        
+
         port_str = ""
         for p in portfolio:
             port_str += f"- {p['name']} ({p['code']}): 占比 {p['ratio']}% | 变动: {p['change']}\n"

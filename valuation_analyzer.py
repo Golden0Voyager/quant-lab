@@ -10,19 +10,20 @@
 """
 
 import logging
-import time
-import re
 import os
-from typing import Optional, Dict, Any, Tuple, List
+import re
+import threading
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Any
 
 import akshare as ak
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-from contextlib import contextmanager
-import threading
+
 from analyst_data import _get_industry
 
 # ==================== 直连模式与并发控制 ====================
@@ -39,10 +40,10 @@ def no_proxy():
     """
     proxy_keys = ('http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'all_proxy', 'ALL_PROXY')
     saved_proxies = {key: os.environ[key] for key in proxy_keys if key in os.environ}
-    
+
     for key in saved_proxies:
         del os.environ[key]
-        
+
     try:
         yield
     finally:
@@ -52,17 +53,17 @@ def no_proxy():
 # 导入新增维度的 fetch 函数
 try:
     from analyst_data import (
-        fetch_consensus_data,
-        fetch_market_env_data,
-        fetch_lockup_data,
         fetch_chip_data,
-        fetch_institution_data,
         fetch_competitor_data,
-        fetch_smart_money_data,
-        fetch_theme_sentiment_data,
-        fetch_support_resistance_data,
-        fetch_news_data,
+        fetch_consensus_data,
+        fetch_institution_data,
         fetch_kline_multi_source,
+        fetch_lockup_data,
+        fetch_market_env_data,
+        fetch_news_data,
+        fetch_smart_money_data,
+        fetch_support_resistance_data,
+        fetch_theme_sentiment_data,
     )
 except ImportError:
     # 兼容性：如果导入失败，定义空函数
@@ -86,131 +87,131 @@ logger = logging.getLogger(__name__)
 class ValuationMetrics:
     """估值指标数据类"""
     # 当前估值
-    pe_ttm: Optional[float] = None
-    pe_static: Optional[float] = None  # PE-静态（基于上年度全年收益）
-    pb: Optional[float] = None
-    ps_ttm: Optional[float] = None
-    pcf: Optional[float] = None  # 市现率
-    p_fcf: Optional[float] = None  # 市值/自由现金流 (新增)
-    dividend_yield: Optional[float] = None  # 股息率 (%)
-    market_cap: Optional[float] = None  # 总市值 (亿)
+    pe_ttm: float | None = None
+    pe_static: float | None = None  # PE-静态（基于上年度全年收益）
+    pb: float | None = None
+    ps_ttm: float | None = None
+    pcf: float | None = None  # 市现率
+    p_fcf: float | None = None  # 市值/自由现金流 (新增)
+    dividend_yield: float | None = None  # 股息率 (%)
+    market_cap: float | None = None  # 总市值 (亿)
 
     # 实时行情数据
-    current_price: Optional[float] = None  # 当前价
-    open_price: Optional[float] = None  # 开盘价
-    close_price: Optional[float] = None  # 昨收价
-    high_price: Optional[float] = None  # 最高价
-    low_price: Optional[float] = None  # 最低价
-    change_pct: Optional[float] = None  # 涨跌幅 (%)
-    change_amount: Optional[float] = None  # 涨跌额 (元)
-    amplitude: Optional[float] = None  # 振幅 (%)
-    volume: Optional[float] = None  # 成交量 (股)
-    amount: Optional[float] = None  # 成交额 (亿)
-    turnover_rate: Optional[float] = None  # 换手率 (%)
-    volume_ratio: Optional[float] = None  # 量比
+    current_price: float | None = None  # 当前价
+    open_price: float | None = None  # 开盘价
+    close_price: float | None = None  # 昨收价
+    high_price: float | None = None  # 最高价
+    low_price: float | None = None  # 最低价
+    change_pct: float | None = None  # 涨跌幅 (%)
+    change_amount: float | None = None  # 涨跌额 (元)
+    amplitude: float | None = None  # 振幅 (%)
+    volume: float | None = None  # 成交量 (股)
+    amount: float | None = None  # 成交额 (亿)
+    turnover_rate: float | None = None  # 换手率 (%)
+    volume_ratio: float | None = None  # 量比
 
     # 均线数据
-    ma5: Optional[float] = None  # 5日均线
-    ma10: Optional[float] = None  # 10日均线
-    ma20: Optional[float] = None  # 20日均线
-    ma60: Optional[float] = None  # 60日均线
-    ma120: Optional[float] = None  # 120日均线
-    ma250: Optional[float] = None  # 250日均线
+    ma5: float | None = None  # 5日均线
+    ma10: float | None = None  # 10日均线
+    ma20: float | None = None  # 20日均线
+    ma60: float | None = None  # 60日均线
+    ma120: float | None = None  # 120日均线
+    ma250: float | None = None  # 250日均线
 
     # 均线距离（当前价距离各均线的百分比）
-    ma5_distance: Optional[float] = None  # 距离5日均线 (%)
-    ma10_distance: Optional[float] = None  # 距离10日均线 (%)
-    ma20_distance: Optional[float] = None  # 距离20日均线 (%)
-    ma60_distance: Optional[float] = None  # 距离60日均线 (%)
-    ma120_distance: Optional[float] = None  # 距离120日均线 (%)
-    ma250_distance: Optional[float] = None  # 距离250日均线 (%)
+    ma5_distance: float | None = None  # 距离5日均线 (%)
+    ma10_distance: float | None = None  # 距离10日均线 (%)
+    ma20_distance: float | None = None  # 距离20日均线 (%)
+    ma60_distance: float | None = None  # 距离60日均线 (%)
+    ma120_distance: float | None = None  # 距离120日均线 (%)
+    ma250_distance: float | None = None  # 距离250日均线 (%)
 
     # 技术指标
     # MACD
-    macd_dif: Optional[float] = None  # MACD DIF值
-    macd_dea: Optional[float] = None  # MACD DEA值
-    macd_hist: Optional[float] = None  # MACD柱状图值
-    macd_signal: Optional[str] = None  # MACD信号（金叉/死叉）
+    macd_dif: float | None = None  # MACD DIF值
+    macd_dea: float | None = None  # MACD DEA值
+    macd_hist: float | None = None  # MACD柱状图值
+    macd_signal: str | None = None  # MACD信号（金叉/死叉）
 
     # RSI
-    rsi_6: Optional[float] = None  # 6日RSI
-    rsi_12: Optional[float] = None  # 12日RSI
-    rsi_24: Optional[float] = None  # 24日RSI
+    rsi_6: float | None = None  # 6日RSI
+    rsi_12: float | None = None  # 12日RSI
+    rsi_24: float | None = None  # 24日RSI
 
     # KDJ
-    kdj_k: Optional[float] = None  # K值
-    kdj_d: Optional[float] = None  # D值
-    kdj_j: Optional[float] = None  # J值
+    kdj_k: float | None = None  # K值
+    kdj_d: float | None = None  # D值
+    kdj_j: float | None = None  # J值
 
     # CCI
-    cci: Optional[float] = None  # CCI商品通道指标
+    cci: float | None = None  # CCI商品通道指标
 
     # 核心财务指标
     # 盈利能力
-    roe: Optional[float] = None  # 净资产收益率 (%)
-    gross_margin: Optional[float] = None  # 毛利率 (%)
-    net_margin: Optional[float] = None  # 净利率 (%)
-    eps: Optional[float] = None  # 每股收益 (元)
-    bps: Optional[float] = None  # 每股净资产 (元)
+    roe: float | None = None  # 净资产收益率 (%)
+    gross_margin: float | None = None  # 毛利率 (%)
+    net_margin: float | None = None  # 净利率 (%)
+    eps: float | None = None  # 每股收益 (元)
+    bps: float | None = None  # 每股净资产 (元)
 
     # 成长性指标
-    revenue_yoy: Optional[float] = None  # 营收同比增长率 (%)
-    revenue_qoq: Optional[float] = None  # 营收环比增长率 (%)
-    profit_yoy: Optional[float] = None  # 净利润同比增长率 (%)
-    profit_qoq: Optional[float] = None  # 净利润环比增长率 (%)
-    eps_yoy: Optional[float] = None  # EPS同比增长率 (%)
+    revenue_yoy: float | None = None  # 营收同比增长率 (%)
+    revenue_qoq: float | None = None  # 营收环比增长率 (%)
+    profit_yoy: float | None = None  # 净利润同比增长率 (%)
+    profit_qoq: float | None = None  # 净利润环比增长率 (%)
+    eps_yoy: float | None = None  # EPS同比增长率 (%)
 
     # 财务健康度
-    debt_asset_ratio: Optional[float] = None  # 资产负债率 (%)
-    current_ratio: Optional[float] = None  # 流动比率
-    quick_ratio: Optional[float] = None  # 速动比率
-    ocf_to_profit: Optional[float] = None  # 经营现金流/净利润比
+    debt_asset_ratio: float | None = None  # 资产负债率 (%)
+    current_ratio: float | None = None  # 流动比率
+    quick_ratio: float | None = None  # 速动比率
+    ocf_to_profit: float | None = None  # 经营现金流/净利润比
 
     # 股本结构
-    total_shares: Optional[float] = None  # 总股本 (亿股)
-    float_shares: Optional[float] = None  # 流通股本 (亿股)
-    float_ratio: Optional[float] = None  # 流通比例 (%)
+    total_shares: float | None = None  # 总股本 (亿股)
+    float_shares: float | None = None  # 流通股本 (亿股)
+    float_ratio: float | None = None  # 流通比例 (%)
 
     # 资金流向（多时间维度）
     # 当天资金流向
-    main_net_inflow_1d: Optional[float] = None  # 当日主力净流入 (亿)
-    super_net_inflow_1d: Optional[float] = None  # 当日超大单净流入 (亿)
-    big_net_inflow_1d: Optional[float] = None  # 当日大单净流入 (亿)
-    medium_net_inflow_1d: Optional[float] = None  # 当日中单净流入 (亿)
-    small_net_inflow_1d: Optional[float] = None  # 当日小单净流入 (亿)
-    main_net_inflow_pct_1d: Optional[float] = None  # 当日主力净流入占比 (%)
+    main_net_inflow_1d: float | None = None  # 当日主力净流入 (亿)
+    super_net_inflow_1d: float | None = None  # 当日超大单净流入 (亿)
+    big_net_inflow_1d: float | None = None  # 当日大单净流入 (亿)
+    medium_net_inflow_1d: float | None = None  # 当日中单净流入 (亿)
+    small_net_inflow_1d: float | None = None  # 当日小单净流入 (亿)
+    main_net_inflow_pct_1d: float | None = None  # 当日主力净流入占比 (%)
 
     # 3日资金流向
-    main_net_inflow_3d: Optional[float] = None  # 3日主力净流入 (亿)
-    super_net_inflow_3d: Optional[float] = None  # 3日超大单净流入 (亿)
-    big_net_inflow_3d: Optional[float] = None  # 3日大单净流入 (亿)
-    medium_net_inflow_3d: Optional[float] = None  # 3日中单净流入 (亿)
-    small_net_inflow_3d: Optional[float] = None  # 3日小单净流入 (亿)
+    main_net_inflow_3d: float | None = None  # 3日主力净流入 (亿)
+    super_net_inflow_3d: float | None = None  # 3日超大单净流入 (亿)
+    big_net_inflow_3d: float | None = None  # 3日大单净流入 (亿)
+    medium_net_inflow_3d: float | None = None  # 3日中单净流入 (亿)
+    small_net_inflow_3d: float | None = None  # 3日小单净流入 (亿)
 
     # 7日（1周）资金流向
-    main_net_inflow_7d: Optional[float] = None  # 7日主力净流入 (亿)
-    super_net_inflow_7d: Optional[float] = None  # 7日超大单净流入 (亿)
-    big_net_inflow_7d: Optional[float] = None  # 7日大单净流入 (亿)
-    medium_net_inflow_7d: Optional[float] = None  # 7日中单净流入 (亿)
-    small_net_inflow_7d: Optional[float] = None  # 7日小单净流入 (亿)
+    main_net_inflow_7d: float | None = None  # 7日主力净流入 (亿)
+    super_net_inflow_7d: float | None = None  # 7日超大单净流入 (亿)
+    big_net_inflow_7d: float | None = None  # 7日大单净流入 (亿)
+    medium_net_inflow_7d: float | None = None  # 7日中单净流入 (亿)
+    small_net_inflow_7d: float | None = None  # 7日小单净流入 (亿)
 
     # PE 历史分位 (%)
-    pe_percentile_10y: Optional[float] = None
-    pe_percentile_5y: Optional[float] = None
-    pe_percentile_3y: Optional[float] = None
-    pe_percentile_1y: Optional[float] = None
+    pe_percentile_10y: float | None = None
+    pe_percentile_5y: float | None = None
+    pe_percentile_3y: float | None = None
+    pe_percentile_1y: float | None = None
 
     # PB 历史分位 (%)
-    pb_percentile_10y: Optional[float] = None
-    pb_percentile_5y: Optional[float] = None
-    pb_percentile_3y: Optional[float] = None
-    pb_percentile_1y: Optional[float] = None
+    pb_percentile_10y: float | None = None
+    pb_percentile_5y: float | None = None
+    pb_percentile_3y: float | None = None
+    pb_percentile_1y: float | None = None
 
     # PS 历史分位 (%)
-    ps_percentile_10y: Optional[float] = None
-    ps_percentile_5y: Optional[float] = None
-    ps_percentile_3y: Optional[float] = None
-    ps_percentile_1y: Optional[float] = None
+    ps_percentile_10y: float | None = None
+    ps_percentile_5y: float | None = None
+    ps_percentile_3y: float | None = None
+    ps_percentile_1y: float | None = None
 
     # 元数据
     stock_name: str = ""
@@ -220,145 +221,145 @@ class ValuationMetrics:
     warnings: list = field(default_factory=list)
 
     # 近20日行情数据
-    recent_20d_data: List[Dict[str, Any]] = field(default_factory=list)
+    recent_20d_data: list[dict[str, Any]] = field(default_factory=list)
 
     # 布林带
-    boll_upper: Optional[float] = None  # 上轨
-    boll_mid: Optional[float] = None  # 中轨
-    boll_lower: Optional[float] = None  # 下轨
-    boll_width: Optional[float] = None  # 带宽 (%)
+    boll_upper: float | None = None  # 上轨
+    boll_mid: float | None = None  # 中轨
+    boll_lower: float | None = None  # 下轨
+    boll_width: float | None = None  # 带宽 (%)
 
     # 近8季度营收/利润趋势
-    quarterly_trend: List[Dict[str, Any]] = field(default_factory=list)
+    quarterly_trend: list[dict[str, Any]] = field(default_factory=list)
 
     # 行业对比
-    industry_name: Optional[str] = None  # 所属行业
-    industry_comparison: Dict[str, Any] = field(default_factory=dict)
+    industry_name: str | None = None  # 所属行业
+    industry_comparison: dict[str, Any] = field(default_factory=dict)
 
     # 十大流通股东变化
-    top_holders_current: List[Dict[str, Any]] = field(default_factory=list)
-    top_holders_previous: List[Dict[str, Any]] = field(default_factory=list)
-    top_holders_report_date: Optional[str] = None
-    top_holders_prev_date: Optional[str] = None
+    top_holders_current: list[dict[str, Any]] = field(default_factory=list)
+    top_holders_previous: list[dict[str, Any]] = field(default_factory=list)
+    top_holders_report_date: str | None = None
+    top_holders_prev_date: str | None = None
 
     # === 新增维度字段 ===
 
     # 数据时效性日期
-    valuation_data_date: Optional[str] = None
-    performance_data_date: Optional[str] = None
-    sentiment_data_date: Optional[str] = None
-    quarterly_trend_data_date: Optional[str] = None
-    top_holders_data_date: Optional[str] = None
-    consensus_data_date: Optional[str] = None
-    market_env_data_date: Optional[str] = None
-    lockup_data_date: Optional[str] = None
-    chip_data_date: Optional[str] = None
-    institution_data_date: Optional[str] = None
-    competitor_data_date: Optional[str] = None
+    valuation_data_date: str | None = None
+    performance_data_date: str | None = None
+    sentiment_data_date: str | None = None
+    quarterly_trend_data_date: str | None = None
+    top_holders_data_date: str | None = None
+    consensus_data_date: str | None = None
+    market_env_data_date: str | None = None
+    lockup_data_date: str | None = None
+    chip_data_date: str | None = None
+    institution_data_date: str | None = None
+    competitor_data_date: str | None = None
 
     # 分析师一致预期
-    eps_forecast_current: Optional[str] = None
-    eps_forecast_next: Optional[str] = None
-    eps_growth_rate: Optional[str] = None
-    eps_growth_rate_raw: Optional[float] = None
-    peg: Optional[str] = None
-    peg_raw: Optional[float] = None
-    peg_signal: Optional[str] = None
-    rating_buy: Optional[int] = None
-    rating_overweight: Optional[int] = None
-    rating_hold: Optional[int] = None
-    target_price_avg: Optional[str] = None
-    target_price_high: Optional[str] = None
-    target_price_low: Optional[str] = None
-    target_upside: Optional[str] = None
-    consensus_summary: Optional[str] = None
+    eps_forecast_current: str | None = None
+    eps_forecast_next: str | None = None
+    eps_growth_rate: str | None = None
+    eps_growth_rate_raw: float | None = None
+    peg: str | None = None
+    peg_raw: float | None = None
+    peg_signal: str | None = None
+    rating_buy: int | None = None
+    rating_overweight: int | None = None
+    rating_hold: int | None = None
+    target_price_avg: str | None = None
+    target_price_high: str | None = None
+    target_price_low: str | None = None
+    target_upside: str | None = None
+    consensus_summary: str | None = None
 
     # 大盘/板块环境
-    market_index_change_5d: Optional[str] = None
-    market_index_change_20d: Optional[str] = None
-    market_index_above_ma20: Optional[bool] = None
-    market_sentiment: Optional[str] = None
-    sector_name: Optional[str] = None
-    sector_change_today: Optional[str] = None
-    sector_rank: Optional[str] = None
-    sector_main_inflow: Optional[str] = None
-    market_env_summary: Optional[str] = None
+    market_index_change_5d: str | None = None
+    market_index_change_20d: str | None = None
+    market_index_above_ma20: bool | None = None
+    market_sentiment: str | None = None
+    sector_name: str | None = None
+    sector_change_today: str | None = None
+    sector_rank: str | None = None
+    sector_main_inflow: str | None = None
+    market_env_summary: str | None = None
 
     # 解禁/减持风险
-    lockup_events: List[Dict[str, Any]] = field(default_factory=list)
-    lockup_nearest_date: Optional[str] = None
-    lockup_6m_total_pct: Optional[str] = None
-    lockup_risk_level: Optional[str] = None
-    lockup_summary: Optional[str] = None
+    lockup_events: list[dict[str, Any]] = field(default_factory=list)
+    lockup_nearest_date: str | None = None
+    lockup_6m_total_pct: str | None = None
+    lockup_risk_level: str | None = None
+    lockup_summary: str | None = None
 
     # 筹码分布
-    chip_profit_ratio: Optional[str] = None
-    chip_profit_ratio_raw: Optional[float] = None
-    chip_avg_cost: Optional[str] = None
-    chip_avg_cost_raw: Optional[float] = None
-    chip_concentration_70: Optional[str] = None
-    chip_concentration_90: Optional[str] = None
-    chip_signal: Optional[str] = None
-    chip_summary: Optional[str] = None
+    chip_profit_ratio: str | None = None
+    chip_profit_ratio_raw: float | None = None
+    chip_avg_cost: str | None = None
+    chip_avg_cost_raw: float | None = None
+    chip_concentration_70: str | None = None
+    chip_concentration_90: str | None = None
+    chip_signal: str | None = None
+    chip_summary: str | None = None
 
     # 机构持仓变化
-    fund_holding_count: Optional[int] = None
-    fund_holding_count_prev: Optional[int] = None
-    fund_holding_change: Optional[str] = None
-    fund_holding_pct: Optional[str] = None
-    fund_holding_change_pct: Optional[str] = None
-    top_funds: List[Dict[str, Any]] = field(default_factory=list)
-    institution_summary: Optional[str] = None
+    fund_holding_count: int | None = None
+    fund_holding_count_prev: int | None = None
+    fund_holding_change: str | None = None
+    fund_holding_pct: str | None = None
+    fund_holding_change_pct: str | None = None
+    top_funds: list[dict[str, Any]] = field(default_factory=list)
+    institution_summary: str | None = None
 
     # 竞争对手对比
-    competitors: List[Dict[str, Any]] = field(default_factory=list)
-    industry_peer_count: Optional[int] = None
-    competitor_summary: Optional[str] = None
+    competitors: list[dict[str, Any]] = field(default_factory=list)
+    industry_peer_count: int | None = None
+    competitor_summary: str | None = None
 
     # [14/17] 聪明钱动向
-    smart_money_data_date: Optional[str] = None
-    north_consecutive_days: Optional[int] = None       # 正=加仓, 负=减仓
-    north_change_pct_3d: Optional[float] = None
-    north_holding_ratio: Optional[float] = None
-    margin_balance: Optional[float] = None              # 亿
-    margin_balance_trend: Optional[str] = None           # 增/减/平
-    short_selling_ratio: Optional[float] = None          # %
-    short_selling_level: Optional[str] = None            # 高位/低位/正常
-    smart_money_summary: Optional[str] = None
+    smart_money_data_date: str | None = None
+    north_consecutive_days: int | None = None       # 正=加仓, 负=减仓
+    north_change_pct_3d: float | None = None
+    north_holding_ratio: float | None = None
+    margin_balance: float | None = None              # 亿
+    margin_balance_trend: str | None = None           # 增/减/平
+    short_selling_ratio: float | None = None          # %
+    short_selling_level: str | None = None            # 高位/低位/正常
+    smart_money_summary: str | None = None
 
     # [15/17] 情绪与题材
-    theme_sentiment_data_date: Optional[str] = None
-    stock_sentiment: Optional[str] = None                # 偏多/偏空/中性
-    hot_concepts: List[str] = field(default_factory=list)
-    hot_concepts_change: List[str] = field(default_factory=list)
-    theme_sentiment_summary: Optional[str] = None
+    theme_sentiment_data_date: str | None = None
+    stock_sentiment: str | None = None                # 偏多/偏空/中性
+    hot_concepts: list[str] = field(default_factory=list)
+    hot_concepts_change: list[str] = field(default_factory=list)
+    theme_sentiment_summary: str | None = None
 
     # [16/17] 支撑压力与风险
-    resistance_price: Optional[float] = None
-    resistance_type: Optional[str] = None
-    support_price: Optional[float] = None
-    support_type: Optional[str] = None
-    fx_sensitivity: Optional[str] = None
-    support_resistance_summary: Optional[str] = None
+    resistance_price: float | None = None
+    resistance_type: str | None = None
+    support_price: float | None = None
+    support_type: str | None = None
+    fx_sensitivity: str | None = None
+    support_resistance_summary: str | None = None
 
     # [17/17] 舆情数据
-    news_summary: Optional[str] = None          # "[东财公告] 15条"
-    news_context: Optional[str] = None          # 完整新闻列表
-    news_source: Optional[str] = None           # "东财公告" / "财联社电报" / etc
-    news_data_date: Optional[str] = None
+    news_summary: str | None = None          # "[东财公告] 15条"
+    news_context: str | None = None          # 完整新闻列表
+    news_source: str | None = None           # "东财公告" / "财联社电报" / etc
+    news_data_date: str | None = None
 
     # 派生技术指标（从已有数据计算，无需新API）
-    boll_position: Optional[float] = None       # 价格在BOLL带中的位置 0-100%
-    boll_status: Optional[str] = None           # "突破上轨" / "接近上轨" / "中轨附近" / etc
-    ma_alignment: Optional[str] = None          # "多头排列" / "空头排列" / "均线纠缠"
-    trend_position: Optional[str] = None        # "年线上方(强势)" / "月线下方" / etc
-    change_5d: Optional[float] = None           # 5日涨跌幅%
-    change_20d: Optional[float] = None          # 20日涨跌幅%
-    high_20d: Optional[float] = None            # 20日最高
-    low_20d: Optional[float] = None             # 20日最低
-    dist_to_high: Optional[float] = None        # 距20日高点%
-    dist_to_low: Optional[float] = None         # 距20日低点%
-    volatility_20d: Optional[float] = None      # 20日波动率
+    boll_position: float | None = None       # 价格在BOLL带中的位置 0-100%
+    boll_status: str | None = None           # "突破上轨" / "接近上轨" / "中轨附近" / etc
+    ma_alignment: str | None = None          # "多头排列" / "空头排列" / "均线纠缠"
+    trend_position: str | None = None        # "年线上方(强势)" / "月线下方" / etc
+    change_5d: float | None = None           # 5日涨跌幅%
+    change_20d: float | None = None          # 20日涨跌幅%
+    high_20d: float | None = None            # 20日最高
+    low_20d: float | None = None             # 20日最低
+    dist_to_high: float | None = None        # 距20日高点%
+    dist_to_low: float | None = None         # 距20日低点%
+    volatility_20d: float | None = None      # 20日波动率
 
 
 class ValuationAnalyzer:
@@ -388,7 +389,7 @@ class ValuationAnalyzer:
             except ImportError:
                 logger.warning("缓存模块不可用，将不使用缓存")
 
-    def _safe_float(self, value) -> Optional[float]:
+    def _safe_float(self, value) -> float | None:
         """安全转换为浮点数"""
         if value is None or pd.isna(value):
             return None
@@ -403,23 +404,23 @@ class ValuationAnalyzer:
         is_hk = (len(symbol) == 5 and symbol.isdigit()) or symbol.endswith('.HK')
         # 自动探测是否为美股 (纯字母，或带.的纯字母如 BRK.B)
         is_us = symbol.isalpha() or ('.' in symbol and symbol.replace('.', '').isalpha())
-        
+
         if market == 'HK' or is_hk:
             # 港股代码格式：直接返回5位代码
             clean_hk = symbol.replace('.HK', '')
             return clean_hk.zfill(5)
-            
+
         if market == 'US' or is_us:
             # 美股代码格式：直接返回
             return symbol
-            
+
         # A股代码格式
         if symbol.startswith(('000', '001', '002', '003', '300')):
             return f"SZ{symbol}"
         else:
             return f"SH{symbol}"
 
-    def fetch_current_valuation(self, symbol: str, stock_name: str) -> Dict[str, Any]:
+    def fetch_current_valuation(self, symbol: str, stock_name: str) -> dict[str, Any]:
         """
         获取当前估值数据（多数据源 + 降级策略）
 
@@ -439,7 +440,7 @@ class ValuationAnalyzer:
         # 尝试数据源1: 雪球 API
         try:
             logger.info(f"📊 获取当前估值: {stock_name} ({symbol})")
-            logger.info(f"🔍 数据源1: 雪球API（优先）")
+            logger.info("🔍 数据源1: 雪球API（优先）")
             xq_symbol = self._convert_symbol(symbol)
 
             # 从环境变量获取 token
@@ -476,7 +477,7 @@ class ValuationAnalyzer:
         except Exception as e:
             error_msg = str(e)[:100]
             logger.warning(f"⚠️  数据源1失败: 雪球API - {type(e).__name__}: {error_msg}")
-            logger.info(f"🔄 切换到备用数据源...")
+            logger.info("🔄 切换到备用数据源...")
 
         # 降级到备用数据源: 百度股市通 + 东方财富
         try:
@@ -527,7 +528,7 @@ class ValuationAnalyzer:
 
         return data
 
-    def _calculate_pe_static(self, symbol: str, current_price: float) -> Optional[float]:
+    def _calculate_pe_static(self, symbol: str, current_price: float) -> float | None:
         """
         计算PE-静态
 
@@ -560,7 +561,7 @@ class ValuationAnalyzer:
 
         return None
 
-    def fetch_fund_flow(self, symbol: str, stock_name: str) -> Dict[str, Any]:
+    def fetch_fund_flow(self, symbol: str, stock_name: str) -> dict[str, Any]:
         """
         获取资金流向数据（多时间维度）
 
@@ -622,16 +623,16 @@ class ValuationAnalyzer:
                         logger.info(f"  ✓ {desc}主力{flow_status}: {abs(data[f'main_net_inflow_{suffix}']):.2f}亿")
 
                 data['source'] = 'eastmoney'
-                logger.info(f"✅ 资金流向数据获取完成（1日/3日/7日）")
+                logger.info("✅ 资金流向数据获取完成（1日/3日/7日）")
             else:
-                logger.warning(f"⚠️  资金流向数据为空")
+                logger.warning("⚠️  资金流向数据为空")
 
         except Exception as e:
             logger.error(f"❌ 获取资金流向失败: {type(e).__name__}: {str(e)[:100]}")
 
         return data
 
-    def fetch_realtime_quote(self, symbol: str, stock_name: str) -> Dict[str, Any]:
+    def fetch_realtime_quote(self, symbol: str, stock_name: str) -> dict[str, Any]:
         """
         获取实时行情数据（包含均线）
 
@@ -821,14 +822,14 @@ class ValuationAnalyzer:
                 logger.info(f"技术指标: MACD={data.get('macd_signal')}, RSI(12)={data.get('rsi_12')}, KDJ({data.get('kdj_k')},{data.get('kdj_d')},{data.get('kdj_j')})")
                 data['source'] = 'akshare_hist'
             else:
-                logger.warning(f"未获取到历史数据")
+                logger.warning("未获取到历史数据")
 
         except Exception as e:
             logger.error(f"获取实时行情失败: {type(e).__name__}: {str(e)[:100]}")
 
         return data
 
-    def _calculate_dividend_yield(self, symbol: str) -> Optional[float]:
+    def _calculate_dividend_yield(self, symbol: str) -> float | None:
         """
         计算股息率(TTM)
 
@@ -883,7 +884,7 @@ class ValuationAnalyzer:
             logger.debug(f"股息率计算失败: {e}")
             return None
 
-    def fetch_quarterly_trend(self, symbol: str, stock_name: str) -> List[Dict[str, Any]]:
+    def fetch_quarterly_trend(self, symbol: str, stock_name: str) -> list[dict[str, Any]]:
         """获取近8季度营收/利润趋势"""
         result = []
         try:
@@ -914,7 +915,7 @@ class ValuationAnalyzer:
             logger.warning(f"季度趋势获取失败: {type(e).__name__}: {str(e)[:100]}")
         return result
 
-    def fetch_industry_comparison(self, symbol: str, stock_name: str, report_date: str = '20250930') -> Dict[str, Any]:
+    def fetch_industry_comparison(self, symbol: str, stock_name: str, report_date: str = '20250930') -> dict[str, Any]:
         """获取行业对比数据（基于业绩报表同行业排名）"""
         result = {}
         try:
@@ -969,7 +970,7 @@ class ValuationAnalyzer:
             logger.warning(f"行业对比获取失败: {type(e).__name__}: {str(e)[:100]}")
         return result
 
-    def fetch_top_holders(self, symbol: str, stock_name: str) -> Dict[str, Any]:
+    def fetch_top_holders(self, symbol: str, stock_name: str) -> dict[str, Any]:
         """获取十大流通股东及变化"""
         result = {}
         try:
@@ -1015,7 +1016,7 @@ class ValuationAnalyzer:
             logger.warning(f"十大流通股东获取失败: {type(e).__name__}: {str(e)[:100]}")
         return result
 
-    def fetch_historical_percentile(self, symbol: str) -> Dict[str, Any]:
+    def fetch_historical_percentile(self, symbol: str) -> dict[str, Any]:
         """
         获取历史分位数据
 
@@ -1035,7 +1036,7 @@ class ValuationAnalyzer:
         }
 
         try:
-            logger.info(f"🔍 获取历史分位数据（百度股市通）")
+            logger.info("🔍 获取历史分位数据（百度股市通）")
 
             # 获取各个周期的 PE 历史数据并计算分位
             pe_percentiles = self._calculate_percentile_from_baidu(symbol, '市盈率(TTM)')
@@ -1054,7 +1055,7 @@ class ValuationAnalyzer:
 
         return data
 
-    def _calculate_percentile_from_baidu(self, symbol: str, indicator: str) -> Dict[str, float]:
+    def _calculate_percentile_from_baidu(self, symbol: str, indicator: str) -> dict[str, float]:
         """
         从百度股市通获取历史数据并计算分位
 
@@ -1065,7 +1066,6 @@ class ValuationAnalyzer:
         Returns:
             各周期的分位数据 {'10y': xx.x, '5y': xx.x, '3y': xx.x, '1y': xx.x}
         """
-        import numpy as np
 
         # 检查缓存
         if self.cache:
@@ -1114,7 +1114,7 @@ class ValuationAnalyzer:
 
         return percentiles
 
-    def _fetch_with_retry(self, url: str, max_retries: int = 3) -> Optional[requests.Response]:
+    def _fetch_with_retry(self, url: str, max_retries: int = 3) -> requests.Response | None:
         """带重试的网络请求"""
         for attempt in range(max_retries):
             try:
@@ -1144,7 +1144,7 @@ class ValuationAnalyzer:
         logger.error(f"请求失败，已达最大重试次数: {url}")
         return None
 
-    def _parse_jiucai_valuation(self, soup: BeautifulSoup, html: str) -> Dict[str, Any]:
+    def _parse_jiucai_valuation(self, soup: BeautifulSoup, html: str) -> dict[str, Any]:
         """解析韭圈儿页面的估值数据"""
         data = {
             'pe_percentiles': {},
@@ -1219,7 +1219,7 @@ class ValuationAnalyzer:
 
         return data
 
-    def _fetch_percentile_legulegu(self, symbol: str) -> Dict[str, Any]:
+    def _fetch_percentile_legulegu(self, symbol: str) -> dict[str, Any]:
         """
         备用数据源：乐咕乐股
 
@@ -1248,7 +1248,7 @@ class ValuationAnalyzer:
 
         return data
 
-    def _fetch_operating_cashflow_direct(self, symbol: str) -> Optional[float]:
+    def _fetch_operating_cashflow_direct(self, symbol: str) -> float | None:
         """
         直接获取经营活动现金流净额（优先方法）
 
@@ -1291,7 +1291,7 @@ class ValuationAnalyzer:
 
         return None
 
-    def fetch_fundamental_data(self, symbol: str, stock_name: str) -> Dict[str, Any]:
+    def fetch_fundamental_data(self, symbol: str, stock_name: str) -> dict[str, Any]:
         """
         获取核心财务指标数据
 
@@ -1351,7 +1351,7 @@ class ValuationAnalyzer:
                 if 'cf_profit_ratio' in perf_data and perf_data['cf_profit_ratio'] != 'N/A':
                     data['ocf_to_profit'] = self._safe_float(perf_data['cf_profit_ratio'])
 
-                logger.info(f"✓ 业绩指标获取完成")
+                logger.info("✓ 业绩指标获取完成")
 
             except Exception as e:
                 logger.warning(f"业绩指标获取失败: {type(e).__name__}: {str(e)[:100]}")
@@ -1502,14 +1502,14 @@ class ValuationAnalyzer:
             except Exception as e:
                 logger.warning(f"利润表获取失败: {type(e).__name__}: {str(e)[:100]}")
 
-            logger.info(f"✅ 财务数据获取完成")
+            logger.info("✅ 财务数据获取完成")
 
         except Exception as e:
             logger.error(f"❌ 财务数据获取失败: {type(e).__name__}: {str(e)[:100]}")
 
         return data
 
-    def calculate_ps_pcf(self, symbol: str, stock_name: str, market_cap: float) -> Dict[str, Any]:
+    def calculate_ps_pcf(self, symbol: str, stock_name: str, market_cap: float) -> dict[str, Any]:
         """
         计算 PS-TTM、PCF 和 P/FCF（优化版：多数据源 + 降级策略）
 
@@ -1591,7 +1591,7 @@ class ValuationAnalyzer:
 
         return data
 
-    def _calculate_free_cashflow(self, symbol: str) -> Optional[float]:
+    def _calculate_free_cashflow(self, symbol: str) -> float | None:
         """
         计算自由现金流（Free Cash Flow）
 
@@ -1660,7 +1660,7 @@ class ValuationAnalyzer:
 
         return None
 
-    def analyze(self, symbol: str, stock_name: str = None, market: str = 'A') -> Tuple[ValuationMetrics, str]:
+    def analyze(self, symbol: str, stock_name: str = None, market: str = 'A') -> tuple[ValuationMetrics, str]:
         """
         执行完整估值分析
 
@@ -1717,7 +1717,7 @@ class ValuationAnalyzer:
         _restore()
         if not current_data.get('pe_ttm') and not current_data.get('pb'):
             metrics.warnings.append("当前估值数据获取失败")
-            print(f"  [ 1/17] 获取估值数据... ❌ 不可用")
+            print("  [ 1/17] 获取估值数据... ❌ 不可用")
         else:
             metrics.pe_ttm = current_data.get('pe_ttm')
             metrics.pb = current_data.get('pb')
@@ -1788,7 +1788,7 @@ class ValuationAnalyzer:
             _chg = f" {metrics.change_pct:+.2f}%" if metrics.change_pct else ""
             print(f"  [ 2/17] 获取实时行情... ✅ {metrics.current_price}元{_chg} MACD={metrics.macd_signal or 'N/A'}")
         else:
-            print(f"  [ 2/17] 获取实时行情... ⚠️  跳过")
+            print("  [ 2/17] 获取实时行情... ⚠️  跳过")
 
         # Step 1.5.1: 计算PE-静态
         if metrics.current_price:
@@ -1887,7 +1887,7 @@ class ValuationAnalyzer:
             metrics.float_ratio = fundamental_data.get('float_ratio')
             print(f"  [ 3/17] 获取财务数据... ✅ ROE={_fmt(metrics.roe, '%')} 毛利率={_fmt(metrics.gross_margin, '%')}")
         else:
-            print(f"  [ 3/17] 获取财务数据... ⚠️  跳过")
+            print("  [ 3/17] 获取财务数据... ⚠️  跳过")
 
         # Step 4: 获取资金流向（多时间维度）
         _quiet()
@@ -1919,7 +1919,7 @@ class ValuationAnalyzer:
             _inflow_str = f"{_inflow:+.2f}亿" if _inflow else "N/A"
             print(f"  [ 4/17] 获取资金流向... ✅ 主力净流入(1日)={_inflow_str}")
         else:
-            print(f"  [ 4/17] 获取资金流向... ⚠️  跳过")
+            print("  [ 4/17] 获取资金流向... ⚠️  跳过")
 
         # Step 5: 获取历史分位（可降级）
         _quiet()
@@ -1944,10 +1944,10 @@ class ValuationAnalyzer:
         if metrics.pe_percentile_3y or metrics.pb_percentile_3y:
             print(f"  [ 5/17] 获取历史分位... ✅ PE分位(3y)={_fmt(metrics.pe_percentile_3y, '%')} PB分位(3y)={_fmt(metrics.pb_percentile_3y, '%')}")
         else:
-            print(f"  [ 5/17] 获取历史分位... ⚠️  不可用")
+            print("  [ 5/17] 获取历史分位... ⚠️  不可用")
 
         # Step 6: 计算 PS、PCF 和 P/FCF（可降级）
-        print(f"  [ 6/17] 计算PS/PCF...", end="", flush=True)
+        print("  [ 6/17] 计算PS/PCF...", end="", flush=True)
         if current_data.get('market_cap'):
             _quiet()
             ps_pcf_data = self.calculate_ps_pcf(symbol, metrics.stock_name, current_data['market_cap'])
@@ -1979,7 +1979,7 @@ class ValuationAnalyzer:
             metrics.industry_comparison = industry_data
             print(f"  [ 8/17] 获取行业对比... ✅ {metrics.industry_name or '未知行业'} ({industry_data.get('peer_count', '?')}家)")
         else:
-            print(f"  [ 8/17] 获取行业对比... ⚠️  跳过")
+            print("  [ 8/17] 获取行业对比... ⚠️  跳过")
 
         # Step 9: 获取十大流通股东
         _quiet()
@@ -1993,7 +1993,7 @@ class ValuationAnalyzer:
             metrics.top_holders_data_date = holders_data.get('current_date')
             print(f"  [ 9/17] 获取股东数据... ✅ {len(metrics.top_holders_current)}位股东 ({metrics.top_holders_report_date or ''})")
         else:
-            print(f"  [ 9/17] 获取股东数据... ⚠️  跳过")
+            print("  [ 9/17] 获取股东数据... ⚠️  跳过")
 
         # Step 10: 获取分析师一致预期
         _quiet()
@@ -2018,10 +2018,10 @@ class ValuationAnalyzer:
                 print(f"  [10/17] 获取分析师预期... ✅ 买入={metrics.rating_buy or 0} 增持={metrics.rating_overweight or 0}{_tp}")
             else:
                 _restore()
-                print(f"  [10/17] 获取分析师预期... ⚠️  无数据")
-        except Exception as e:
+                print("  [10/17] 获取分析师预期... ⚠️  无数据")
+        except Exception:
             _restore()
-            print(f"  [10/17] 获取分析师预期... ⚠️  失败")
+            print("  [10/17] 获取分析师预期... ⚠️  失败")
 
         # Step 11: 获取大盘/板块环境
         _quiet()
@@ -2042,10 +2042,10 @@ class ValuationAnalyzer:
                 print(f"  [11/17] 获取大盘环境... ✅ {metrics.market_sentiment or ''} 板块={metrics.sector_name or 'N/A'}")
             else:
                 _restore()
-                print(f"  [11/17] 获取大盘环境... ⚠️  无数据")
-        except Exception as e:
+                print("  [11/17] 获取大盘环境... ⚠️  无数据")
+        except Exception:
             _restore()
-            print(f"  [11/17] 获取大盘环境... ⚠️  失败")
+            print("  [11/17] 获取大盘环境... ⚠️  失败")
 
         # Step 12: 获取解禁/筹码/机构
         _quiet()
@@ -2092,7 +2092,7 @@ class ValuationAnalyzer:
                 metrics.top_funds = institution_data.get('top_funds', [])
                 metrics.institution_summary = institution_data.get('institution_summary')
                 _sub_ok.append("机构")
-        except Exception as e:
+        except Exception:
             pass
 
         _restore()
@@ -2111,10 +2111,10 @@ class ValuationAnalyzer:
                 print(f"  [13/17] 获取竞争对手... ✅ {metrics.industry_peer_count or len(metrics.competitors)}家同行")
             else:
                 _restore()
-                print(f"  [13/17] 获取竞争对手... ⚠️  无数据")
-        except Exception as e:
+                print("  [13/17] 获取竞争对手... ⚠️  无数据")
+        except Exception:
             _restore()
-            print(f"  [13/17] 获取竞争对手... ⚠️  失败")
+            print("  [13/17] 获取竞争对手... ⚠️  失败")
 
         # Step 14: 获取聪明钱动向
         _quiet()
@@ -2134,10 +2134,10 @@ class ValuationAnalyzer:
                 print(f"  [14/17] 获取聪明钱动向... ✅ {metrics.smart_money_summary or ''}")
             else:
                 _restore()
-                print(f"  [14/17] 获取聪明钱动向... ⚠️  无数据")
-        except Exception as e:
+                print("  [14/17] 获取聪明钱动向... ⚠️  无数据")
+        except Exception:
             _restore()
-            print(f"  [14/17] 获取聪明钱动向... ⚠️  失败")
+            print("  [14/17] 获取聪明钱动向... ⚠️  失败")
 
         # Step 15: 获取情绪与题材
         _quiet()
@@ -2153,10 +2153,10 @@ class ValuationAnalyzer:
                 print(f"  [15/17] 获取情绪与题材... ✅ {metrics.theme_sentiment_summary or ''}")
             else:
                 _restore()
-                print(f"  [15/17] 获取情绪与题材... ⚠️  无数据")
-        except Exception as e:
+                print("  [15/17] 获取情绪与题材... ⚠️  无数据")
+        except Exception:
             _restore()
-            print(f"  [15/17] 获取情绪与题材... ⚠️  失败")
+            print("  [15/17] 获取情绪与题材... ⚠️  失败")
 
         # Step 16: 计算支撑压力与风险（无需新API，从已有数据计算）
         try:
@@ -2180,9 +2180,9 @@ class ValuationAnalyzer:
                 metrics.support_resistance_summary = sr_data.get('support_resistance_summary')
                 print(f"  [16/17] 计算支撑压力位... ✅ {metrics.support_resistance_summary or ''}")
             else:
-                print(f"  [16/17] 计算支撑压力位... ⚠️  无数据")
-        except Exception as e:
-            print(f"  [16/17] 计算支撑压力位... ⚠️  失败")
+                print("  [16/17] 计算支撑压力位... ⚠️  无数据")
+        except Exception:
+            print("  [16/17] 计算支撑压力位... ⚠️  失败")
 
         # Step 17: 获取舆情数据
         try:
@@ -2197,10 +2197,10 @@ class ValuationAnalyzer:
                 print(f"  [17/17] 获取舆情数据... ✅ {metrics.news_summary or ''}")
             else:
                 _restore()
-                print(f"  [17/17] 获取舆情数据... ⚠️  无数据")
-        except Exception as e:
+                print("  [17/17] 获取舆情数据... ⚠️  无数据")
+        except Exception:
             _restore()
-            print(f"  [17/17] 获取舆情数据... ⚠️  失败")
+            print("  [17/17] 获取舆情数据... ⚠️  失败")
 
         # 计算PEG
         if metrics.pe_ttm and metrics.eps_growth_rate_raw and metrics.eps_growth_rate_raw > 0:
@@ -2226,11 +2226,11 @@ class ValuationAnalyzer:
         summary = self._generate_summary(metrics)
 
         print(f"{'='*60}")
-        print(f"✅ 估值分析完成！\n")
+        print("✅ 估值分析完成！\n")
 
         return metrics, summary
 
-    def _analyze_hk_stock(self, symbol: str, stock_name: str, metrics: ValuationMetrics) -> Tuple[ValuationMetrics, str]:
+    def _analyze_hk_stock(self, symbol: str, stock_name: str, metrics: ValuationMetrics) -> tuple[ValuationMetrics, str]:
         """
         港股专用分析方法
 
@@ -2297,7 +2297,7 @@ class ValuationAnalyzer:
         # 生成摘要
         summary = self._generate_hk_summary(metrics)
 
-        logger.info(f"\n✅ 港股估值分析完成！")
+        logger.info("\n✅ 港股估值分析完成！")
 
         return metrics, summary
 
@@ -2725,7 +2725,7 @@ class ValuationAnalyzer:
 
         # 情绪与题材
         if metrics.theme_sentiment_summary:
-            lines.append(f"### 📰 舆情与题材")
+            lines.append("### 📰 舆情与题材")
             lines.append(f"- {metrics.theme_sentiment_summary}")
             if metrics.hot_concepts:
                 concepts_str = '、'.join(metrics.hot_concepts[:3])
@@ -2781,7 +2781,7 @@ class ValuationAnalyzer:
             完整的 Prompt 字符串
         """
         # 估值解读辅助函数
-        def interpret_percentile(value: Optional[float]) -> str:
+        def interpret_percentile(value: float | None) -> str:
             if value is None:
                 return "N/A"
             if value < 20:

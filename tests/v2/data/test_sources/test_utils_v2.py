@@ -20,9 +20,8 @@ class TestNoProxyV2:
 
     def test_no_proxy_vars(self) -> None:
         """When no proxy vars exist, no_proxy still works."""
-        with patch.dict(os.environ, {}, clear=True):
-            with no_proxy():
-                pass
+        with patch.dict(os.environ, {}, clear=True), no_proxy():
+            pass
 
 
 class TestSafeFloatV2:

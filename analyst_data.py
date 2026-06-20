@@ -5,15 +5,15 @@
 功能：抓取估值、业绩、资金情绪、宏观折溢价四大维度数据
 """
 
-import akshare as ak
-import pandas as pd
-from datetime import datetime, timedelta
 import logging
-import numpy as np
 import os  # 用于读取环境变量
-from contextlib import contextmanager
 import sys
 import threading
+from contextlib import contextmanager
+from datetime import datetime, timedelta
+
+import akshare as ak
+import pandas as pd
 
 # 全局禁用 tqdm 进度条（akshare 内部使用），避免干扰终端输出
 os.environ['TQDM_DISABLE'] = '1'
@@ -124,10 +124,10 @@ def no_proxy():
     """
     proxy_keys = ('http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'all_proxy', 'ALL_PROXY')
     saved_proxies = {key: os.environ[key] for key in proxy_keys if key in os.environ}
-    
+
     for key in saved_proxies:
         del os.environ[key]
-        
+
     try:
         yield
     finally:
@@ -213,7 +213,7 @@ def _calculate_percentile_from_baidu(symbol: str, indicator: str) -> dict:
     periods = [('近十年', '10y'), ('近五年', '5y'), ('近三年', '3y'), ('近一年', '1y')]
 
 
-    
+
 
 
     for period_name, period_key in periods:
@@ -384,7 +384,7 @@ def fetch_valuation_data(symbol: str, stock_name: str) -> dict:
                 bvps = _safe_float(row.get('每股净资产'))
 
 
-                
+
 
 
                 # 获取最新价（多源容错：东财 → 新浪）
@@ -405,7 +405,7 @@ def fetch_valuation_data(symbol: str, stock_name: str) -> dict:
                 price = _safe_float(hist_df.iloc[-1]['收盘']) if hist_df is not None and not hist_df.empty else None
 
 
-                
+
 
 
                 if price:
@@ -417,7 +417,7 @@ def fetch_valuation_data(symbol: str, stock_name: str) -> dict:
                     if bvps and bvps > 0: data['pb_raw'] = round(price / bvps, 2)
 
 
-                
+
 
 
                 # 获取市值
@@ -450,7 +450,7 @@ def fetch_valuation_data(symbol: str, stock_name: str) -> dict:
                 data['pe_percentiles'] = pe_pcts # 存入完整字典供后续使用
 
 
-            
+
 
 
             pb_pcts = _calculate_percentile_from_baidu(symbol, '市净率')
@@ -664,7 +664,7 @@ def fetch_performance_data(symbol: str, stock_name: str) -> dict:
 
         except Exception as e:
             logging.warning(f"⚠️  利润表数据获取失败: {type(e).__name__} - {str(e)[:100]}")
-            logging.info(f"💡 影响: 部分业绩指标不可用，将尝试其他数据源补充")
+            logging.info("💡 影响: 部分业绩指标不可用，将尝试其他数据源补充")
             data['performance_summary'] = "业绩数据缺失"
             data['revenue_yoy'] = "N/A"
             data['profit_yoy'] = "N/A"
@@ -711,11 +711,11 @@ def fetch_sentiment_data(symbol: str, stock_name: str) -> dict:
 
                     data['volume_ratio'] = f"{vr:.2f}" if vr else "N/A"
                     data['turnover_rate'] = f"{tr:.2f}%" if tr else "N/A"
-                    
+
                     if vr:
                         data['volume_alert'] = "⚠️ 放量" if vr > 2.0 else ("缩量" if vr < 0.5 else "正常")
-                    
-                    logging.info(f"✓ 资金情绪获取成功 (源: 雪球)")
+
+                    logging.info("✓ 资金情绪获取成功 (源: 雪球)")
             except: pass
 
         # 策略2: 降级到东财基础信息
@@ -778,7 +778,7 @@ def fetch_macro_etf_data(symbol: str, asset_type: str = "stock") -> dict:
     data = {}
 
     try:
-        logging.info(f"🌍 获取宏观数据")
+        logging.info("🌍 获取宏观数据")
 
         # 1. ETF折溢价（仅针对ETF）
         if asset_type == "etf":
@@ -989,7 +989,7 @@ def fetch_recent_20d_and_boll(symbol: str, stock_name: str) -> dict:
                         else:
                             data['boll_status'] = "中轨附近"
 
-            logging.info(f"✓ 近20日行情获取完成")
+            logging.info("✓ 近20日行情获取完成")
     except Exception as e:
         logging.warning(f"近20日行情获取失败: {type(e).__name__}: {str(e)[:80]}")
     return data
@@ -1162,7 +1162,7 @@ def fetch_consensus_data(symbol: str, stock_name: str) -> dict:
                     data['eps_forecast_current'] = f"{forecast_df.iloc[0]['均值']:.2f}"
                     data['eps_forecast_current_raw'] = float(forecast_df.iloc[0]['均值'])
 
-                logging.info(f"✓ 盈利预测获取成功 (源: 同花顺)")
+                logging.info("✓ 盈利预测获取成功 (源: 同花顺)")
         except Exception as e:
             logging.warning(f"盈利预测获取失败: {type(e).__name__}: {str(e)[:80]}")
 
@@ -1211,7 +1211,7 @@ def fetch_consensus_data(symbol: str, stock_name: str) -> dict:
                         data['rating_overweight'] = int(ratings.get('增持', 0))
                         data['rating_hold'] = int(ratings.get('中性', 0) + ratings.get('持有', 0))
 
-                logging.info(f"✓ 机构评级获取成功")
+                logging.info("✓ 机构评级获取成功")
         except Exception as e:
             logging.warning(f"机构评级获取失败: {type(e).__name__}: {str(e)[:80]}")
 
@@ -1243,7 +1243,7 @@ def fetch_consensus_data(symbol: str, stock_name: str) -> dict:
 
         data['consensus_summary'] = ' | '.join(parts) if parts else '暂无分析师覆盖'
 
-        logging.info(f"✅ 分析师一致预期获取完成")
+        logging.info("✅ 分析师一致预期获取完成")
 
     except Exception as e:
         logging.error(f"❌ 分析师一致预期获取失败: {type(e).__name__}")
@@ -1699,7 +1699,7 @@ def fetch_market_env_data(symbol: str, stock_name: str) -> dict:
                             logging.info(f"✓ 行业板块(东财): {len(board_df)}个行业")
                     except Exception as e:
                         logging.debug(f"行业板块(东财)失败: {type(e).__name__}: {str(e)[:60]}")
-                    
+
                     # 策略2: 同花顺 (列名不同，需统一)
                     if _board_cache['data'] is None:
                         try:
@@ -1816,7 +1816,7 @@ def fetch_market_env_data(symbol: str, stock_name: str) -> dict:
 
         data['market_env_summary'] = ' | '.join(parts) if parts else '大盘环境数据不可用'
 
-        logging.info(f"✅ 大盘/板块环境获取完成")
+        logging.info("✅ 大盘/板块环境获取完成")
 
     except Exception as e:
         logging.error(f"❌ 大盘/板块环境获取失败: {type(e).__name__}")
@@ -1952,7 +1952,7 @@ def fetch_lockup_data(symbol: str, stock_name: str) -> dict:
         else:
             data['lockup_summary'] = '近期无解禁'
 
-        logging.info(f"✅ 解禁/减持风险获取完成")
+        logging.info("✅ 解禁/减持风险获取完成")
 
     except Exception as e:
         logging.error(f"❌ 解禁/减持风险获取失败: {type(e).__name__}")
@@ -2117,7 +2117,7 @@ def fetch_chip_data(symbol: str, stock_name: str) -> dict:
                             data['chip_signal'] = f'略高于主力成本{price_vs_cost:.1f}%'
                             data['chip_profit_ratio'] = f"~{50 + price_vs_cost:.0f}%"
                         elif price_vs_cost > -10:
-                            data['chip_signal'] = f'接近主力成本'
+                            data['chip_signal'] = '接近主力成本'
                             data['chip_profit_ratio'] = f"~{50 + price_vs_cost:.0f}%"
                         else:
                             data['chip_signal'] = f'价格低于主力成本{-price_vs_cost:.1f}%'
@@ -2149,7 +2149,7 @@ def fetch_chip_data(symbol: str, stock_name: str) -> dict:
 
         data['chip_summary'] = ' | '.join(parts) if parts else '筹码数据不可用'
 
-        logging.info(f"✅ 筹码分布获取完成")
+        logging.info("✅ 筹码分布获取完成")
 
     except Exception as e:
         logging.error(f"❌ 筹码分布获取失败: {type(e).__name__}")
@@ -2363,7 +2363,7 @@ def fetch_institution_data(symbol: str, stock_name: str) -> dict:
 
         data['institution_summary'] = ' | '.join(parts) if parts else '暂无机构持仓数据'
 
-        logging.info(f"✅ 机构持仓变化获取完成")
+        logging.info("✅ 机构持仓变化获取完成")
 
     except Exception as e:
         logging.error(f"❌ 机构持仓变化获取失败: {type(e).__name__}")
@@ -2528,7 +2528,7 @@ def fetch_competitor_data(symbol: str, stock_name: str) -> dict:
         else:
             data['competitor_summary'] = f"行业: {industry}" if industry else '暂无竞争对手数据'
 
-        logging.info(f"✅ 竞争对手对比获取完成")
+        logging.info("✅ 竞争对手对比获取完成")
 
     except Exception as e:
         logging.error(f"❌ 竞争对手对比获取失败: {type(e).__name__}")
@@ -2618,7 +2618,7 @@ def fetch_smart_money_data(symbol: str, stock_name: str) -> dict:
                             data['north_holding_ratio'] = round(val, 2)
                             break
 
-                logging.info(f"✓ 北向资金获取成功")
+                logging.info("✓ 北向资金获取成功")
         except Exception as e:
             logging.debug(f"北向资金获取失败: {type(e).__name__}: {str(e)[:80]}")
 
@@ -2679,7 +2679,7 @@ def fetch_smart_money_data(symbol: str, stock_name: str) -> dict:
                         else:
                             data['short_selling_level'] = '正常'
 
-                logging.info(f"✓ 融资融券获取成功")
+                logging.info("✓ 融资融券获取成功")
         except Exception as e:
             logging.debug(f"融资融券获取失败: {type(e).__name__}: {str(e)[:80]}")
 
@@ -2708,7 +2708,7 @@ def fetch_smart_money_data(symbol: str, stock_name: str) -> dict:
 
         data['smart_money_summary'] = ' | '.join(parts) if parts else '暂无聪明钱数据'
 
-        logging.info(f"✅ 聪明钱动向获取完成")
+        logging.info("✅ 聪明钱动向获取完成")
 
     except Exception as e:
         logging.error(f"❌ 聪明钱动向获取失败: {type(e).__name__}")
@@ -2827,7 +2827,7 @@ def fetch_theme_sentiment_data(symbol: str, stock_name: str) -> dict:
 
         data['theme_sentiment_summary'] = ' | '.join(parts) if parts else '暂无情绪题材数据'
 
-        logging.info(f"✅ 情绪与题材获取完成")
+        logging.info("✅ 情绪与题材获取完成")
 
     except Exception as e:
         logging.error(f"❌ 情绪与题材获取失败: {type(e).__name__}")
@@ -2937,7 +2937,7 @@ def fetch_support_resistance_data(symbol: str, stock_name: str, context: dict) -
 
         data['support_resistance_summary'] = ' | '.join(parts) if parts else '暂无支撑压力数据'
 
-        logging.info(f"✅ 支撑压力位计算完成")
+        logging.info("✅ 支撑压力位计算完成")
 
     except Exception as e:
         logging.error(f"❌ 支撑压力位计算失败: {type(e).__name__}")
@@ -2965,9 +2965,9 @@ def fetch_news_data(symbol: str, stock_name: str) -> dict:
 
     try:
         from analyst_base import (
+            format_telegraph_for_report,
             get_eastmoney_announcements,
             match_relevant_telegraphs,
-            format_telegraph_for_report,
         )
 
         news_list = []
@@ -3174,7 +3174,7 @@ def fetch_full_stock_data(symbol: str, stock_name: str, asset_type: str = "stock
     except Exception as e:
         logging.debug(f"PEG计算失败: {e}")
 
-    logging.info(f"\n✅ 数据抓取完成！\n")
+    logging.info("\n✅ 数据抓取完成！\n")
 
     return result
 

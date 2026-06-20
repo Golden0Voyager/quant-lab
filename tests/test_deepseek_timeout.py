@@ -9,8 +9,9 @@ import sys
 # 修复路径，确保在 tests 目录下也能找到根目录的模块
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import time
 import logging
+import time
+
 from openai import OpenAI
 
 # 配置日志
@@ -40,9 +41,9 @@ def test_deepseek_call():
     print("="*60)
     print("DeepSeek API 调用测试")
     print("="*60)
-    print(f"模型: deepseek-v3.2")
-    print(f"超时时间: 180秒")
-    print(f"重试次数: 3次")
+    print("模型: deepseek-v3.2")
+    print("超时时间: 180秒")
+    print("重试次数: 3次")
     print("="*60 + "\n")
 
     # 测试带优化的调用
@@ -63,10 +64,10 @@ def test_deepseek_call():
             result = completion.choices[0].message.content
 
             print(f"\n{'='*60}")
-            print(f"✅ 调用成功！")
+            print("✅ 调用成功！")
             print(f"{'='*60}")
             print(f"耗时: {elapsed_time:.2f} 秒")
-            print(f"\n分析结果：")
+            print("\n分析结果：")
             print(f"{'='*60}")
             print(result)
             print(f"{'='*60}\n")

@@ -1,16 +1,17 @@
 import os
+
 os.environ['TQDM_DISABLE'] = '1'
+
+import logging
+import re
+import time
+from datetime import datetime, timedelta
+from functools import wraps
 
 import akshare as ak
 import pandas as pd
-from datetime import datetime, timedelta
-import time
-import json
-from ddgs import DDGS
-import logging
 import requests
-from contextlib import contextmanager
-from functools import wraps
+from ddgs import DDGS
 
 # --- 配置日志系统 ---
 logging.basicConfig(
@@ -211,7 +212,7 @@ def fetch_kline_data(asset_type, clean_symbol, start_date, end_date):
                 return df
         except Exception as e:
             logging.debug(f"K线(港股东财)失败: {type(e).__name__}: {str(e)[:80]}")
-            
+
         # 策略2: 新浪作备用 (无复权参数但能解决阻断)
         try:
             df = ak.stock_hk_daily(symbol=hk_code)
@@ -289,11 +290,11 @@ def fetch_fund_flow_data(clean_symbol, market):
     """
     is_hk = (len(clean_symbol) == 5 and clean_symbol.isdigit()) or clean_symbol.endswith('.HK')
     is_us = clean_symbol.isalpha() or ('.' in clean_symbol and clean_symbol.replace('.', '').isalpha())
-    
+
     if is_hk or is_us:
         # 港美股暂不支持主力资金流向实时接口，直接返回空表供上层做降级处理
         return pd.DataFrame()
-        
+
     return ak.stock_individual_fund_flow(stock=clean_symbol, market=market)
 
 # === 财联社电报集成逻辑 (内聚版) ===
@@ -396,10 +397,10 @@ def format_telegraph_for_report(matched_items):
 def fetch_stock_data(symbol, stock_name):
     asset_type = detect_asset_type(symbol)
     clean_symbol = clean_code_for_akshare(symbol, asset_type)
-    
+
     print(f"📥 [{asset_type.upper()}] 拉取: {stock_name} ({clean_symbol})...")
     data = {'type': asset_type, 'name': stock_name, 'code': symbol}
-    
+
     # === A. 技术面 (分接口获取) ===
     try:
         end_date = datetime.now()
@@ -610,7 +611,7 @@ MACD: {data.get('macd_signal', 'N/A')}
             market = "sh" if clean_symbol.startswith(("6", "68")) else "sz"
             # 🎯 使用带重试的资金流向获取函数
             fund_flow = fetch_fund_flow_data(clean_symbol, market)
-            
+
             if fund_flow.empty:
                 data['money_summary'] = "港股暂无资金流向" if len(clean_symbol) == 5 else "暂无资金流向"
                 data['money_context'] = "暂无资金明细"
@@ -726,7 +727,7 @@ MACD: {data.get('macd_signal', 'N/A')}
                 status = "上涨" if change > 0 else "下跌"
                 news_list = [f"无个股新闻/公告。市场背景: 上证指数近期{status}"]
                 news_source = "大盘背景"
-                logging.info(f"✓ 使用大盘背景信息")
+                logging.info("✓ 使用大盘背景信息")
             except Exception as e:
                 logging.warning(f"✗ 大盘数据获取失败: {type(e).__name__}")
 
@@ -779,6 +780,6 @@ class BaseAnalyst:
     """分析器基类接口"""
     def fetch_data(self, symbol: str, name: str):
         raise NotImplementedError
-    
+
     def get_report_context(self, data: dict) -> str:
         raise NotImplementedError

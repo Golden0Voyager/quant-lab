@@ -1,12 +1,13 @@
+import argparse
 import os
 import re
 import time
+from datetime import datetime
+
 import markdown
 from playwright.sync_api import sync_playwright
-from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-import argparse
-from datetime import datetime
+from watchdog.observers import Observer
 
 # 专业金融研报 CSS
 REPORT_CSS = """
@@ -221,7 +222,7 @@ def md_to_pdf(md_path, pdf_path):
 
     print(f"[{datetime.now().strftime('%H:%M:%S')}] 转换: {os.path.basename(md_path)}")
 
-    with open(md_path, 'r', encoding='utf-8') as f:
+    with open(md_path, encoding='utf-8') as f:
         md_content = f.read()
 
     html_content = markdown.markdown(md_content, extensions=['extra', 'tables', 'toc'])
@@ -235,7 +236,7 @@ def md_to_pdf(md_path, pdf_path):
     # 加载 SVG logo
     logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'logo_banner.svg')
     try:
-        with open(logo_path, 'r', encoding='utf-8') as f:
+        with open(logo_path, encoding='utf-8') as f:
             logo_svg = f.read()
     except FileNotFoundError:
         logo_svg = '<span style="font-size:18px;font-weight:700;color:#1e40af;">量知 AIpha</span>'

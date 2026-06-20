@@ -12,6 +12,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import socket
 import time
 
+
 def test_dns():
     """测试 DNS 解析"""
     print("\n" + "="*60)
@@ -88,7 +89,7 @@ def test_dashscope_https():
 
         response = requests.get(url, timeout=10)
         print(f"✓ 状态码: {response.status_code}")
-        print(f"✓ 服务器响应")
+        print("✓ 服务器响应")
 
     except Exception as e:
         print(f"✗ 失败: {type(e).__name__}")
@@ -148,8 +149,8 @@ def test_openai_with_httpx():
     print("="*60)
 
     try:
+
         import httpx
-        import json
 
         api_key = os.getenv("DASHSCOPE_API_KEY")
 

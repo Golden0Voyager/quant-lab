@@ -3,19 +3,21 @@
 测试完整的支付流程：注册 -> 登录 -> 创建订单 -> 模拟支付回调
 """
 
-import sys
 import os
+import sys
 import time
+
 import requests
-import json
 
 # 添加项目根目录到路径
 sys.path.insert(0, '/Users/hainingyu/Code/quant_lab')
 os.chdir('/Users/hainingyu/Code/quant_lab')
 
 # 启动Flask应用
-from api.app import app
 from threading import Thread
+
+from api.app import app
+
 
 def run_app():
     app.run(host='0.0.0.0', port=5003, debug=False, use_reloader=False)
@@ -48,7 +50,7 @@ if response.status_code == 201:
     result = response.json()
     access_token = result['data']['access_token']
     user_info = result['data']['user']
-    print(f"   ✅ 注册成功!")
+    print("   ✅ 注册成功!")
     print(f"   用户名: {user_info['username']}")
     print(f"   免费额度: 快速{user_info['fast_reports_quota']}次, 深度{user_info['deep_reports_quota']}次")
 else:
@@ -65,12 +67,12 @@ if response.status_code == 200:
     single_reports = result['data']['single_reports']
     subscriptions = result['data']['subscriptions']
 
-    print(f"   ✅ 获取成功!")
-    print(f"\n   📊 单次报告产品:")
+    print("   ✅ 获取成功!")
+    print("\n   📊 单次报告产品:")
     for product in single_reports:
         print(f"      - {product['name']}: ¥{product['price']} (SKU: {product['sku']})")
 
-    print(f"\n   📅 订阅包产品:")
+    print("\n   📅 订阅包产品:")
     for product in subscriptions:
         print(f"      - {product['name']}: ¥{product['price']} (SKU: {product['sku']})")
 else:
@@ -94,7 +96,7 @@ if response.status_code == 201:
     order = result['data']['order']
     payment = result['data']['payment']
 
-    print(f"   ✅ 订单创建成功!")
+    print("   ✅ 订单创建成功!")
     print(f"   订单号: {order['order_no']}")
     print(f"   产品: {order['product_name']}")
     print(f"   金额: ¥{order['final_amount']}")
@@ -118,7 +120,7 @@ response = requests.post(f"{BASE_URL}/api/payment/notify", json=notify_data)
 print(f"   状态码: {response.status_code}")
 
 if response.status_code == 200:
-    print(f"   ✅ 支付回调处理成功!")
+    print("   ✅ 支付回调处理成功!")
 else:
     print(f"   ❌ 回调处理失败: {response.text}")
 
@@ -131,7 +133,7 @@ if response.status_code == 200:
     result = response.json()
     order = result['data']['order']
 
-    print(f"   ✅ 查询成功!")
+    print("   ✅ 查询成功!")
     print(f"   订单状态: {order['status']}")
     print(f"   支付时间: {order.get('paid_at', 'N/A')}")
 else:
@@ -146,7 +148,7 @@ if response.status_code == 200:
     result = response.json()
     user = result['data']['user']
 
-    print(f"   ✅ 用户信息:")
+    print("   ✅ 用户信息:")
     print(f"   用户名: {user['username']}")
     print(f"   当前额度: 快速{user['fast_reports_quota']}次, 深度{user['deep_reports_quota']}次")
     print(f"   累计消费: ¥{user['total_spent']}")
@@ -166,7 +168,7 @@ print(f"   状态码: {response.status_code}")
 if response.status_code == 201:
     result = response.json()
     order = result['data']['order']
-    print(f"   ✅ 订单创建成功!")
+    print("   ✅ 订单创建成功!")
     print(f"   订单号: {order['order_no']}")
     print(f"   产品: {order['product_name']}")
     print(f"   金额: ¥{order['final_amount']}")
@@ -180,18 +182,18 @@ if response.status_code == 201:
 
     response = requests.post(f"{BASE_URL}/api/payment/notify", json=notify_data)
     if response.status_code == 200:
-        print(f"   ✅ 支付成功!")
+        print("   ✅ 支付成功!")
 
         # 再次查看用户信息
         response = requests.get(f"{BASE_URL}/api/auth/me", headers=headers)
         if response.status_code == 200:
             user = response.json()['data']['user']
-            print(f"\n   📊 订阅后的用户信息:")
+            print("\n   📊 订阅后的用户信息:")
             print(f"   用户角色: {user['role']}")
             print(f"   订阅到期: {user.get('subscription_expires', 'N/A')}")
             print(f"   当前额度: 快速{user['fast_reports_quota']}次, 深度{user['deep_reports_quota']}次")
     else:
-        print(f"   ❌ 支付失败")
+        print("   ❌ 支付失败")
 
 # ==================== 8. 获取订单列表 ====================
 print("\n📋 步骤 8: 获取订单列表...")

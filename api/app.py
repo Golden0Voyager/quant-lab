@@ -3,14 +3,15 @@ Quant Lab API 应用入口
 提供个股分析和自选股监控的RESTful API
 """
 
+import logging
+import os
+from datetime import timedelta
+
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask_jwt_extended import JWTManager
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from flask_jwt_extended import JWTManager
-import logging
-from datetime import datetime, timedelta
-import os
 
 # 配置日志
 logging.basicConfig(
@@ -38,6 +39,7 @@ app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=30)  # refresh token有
 
 # 初始化数据库
 from api.models.database import db
+
 db.init_app(app)
 
 # 初始化JWT
@@ -52,7 +54,7 @@ limiter = Limiter(
 )
 
 # 导入路由
-from api.routes import analyze, health, auth, payment
+from api.routes import analyze, auth, health, payment
 
 # 注册蓝图
 app.register_blueprint(health.bp)

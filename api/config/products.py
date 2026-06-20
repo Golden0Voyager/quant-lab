@@ -4,7 +4,7 @@
 """
 
 from enum import Enum
-from typing import Dict, Any
+from typing import Any
 
 
 class ProductType(Enum):
@@ -16,7 +16,7 @@ class ProductType(Enum):
 class Product:
     """产品基类"""
     def __init__(self, sku: str, name: str, price: float, product_type: ProductType,
-                 description: str = "", quota: Dict[str, int] = None):
+                 description: str = "", quota: dict[str, int] = None):
         self.sku = sku
         self.name = name
         self.price = price
@@ -24,7 +24,7 @@ class Product:
         self.description = description
         self.quota = quota or {}  # 额度配置 {"fast": 3, "deep": 1}
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "sku": self.sku,
             "name": self.name,
@@ -111,12 +111,12 @@ def get_product_by_sku(sku: str) -> Product:
     return None
 
 
-def get_all_products() -> Dict[str, Product]:
+def get_all_products() -> dict[str, Product]:
     """获取所有产品"""
     return ALL_PRODUCTS
 
 
-def get_products_by_type(product_type: ProductType) -> Dict[str, Product]:
+def get_products_by_type(product_type: ProductType) -> dict[str, Product]:
     """根据类型获取产品"""
     if product_type == ProductType.SINGLE_REPORT:
         return PRODUCTS_SINGLE_REPORT

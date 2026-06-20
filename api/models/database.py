@@ -2,10 +2,11 @@
 数据库模型
 """
 
-from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
-from werkzeug.security import generate_password_hash, check_password_hash
 import enum
+from datetime import datetime
+
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import check_password_hash, generate_password_hash
 
 db = SQLAlchemy()
 

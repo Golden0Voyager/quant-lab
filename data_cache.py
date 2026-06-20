@@ -3,12 +3,12 @@
 支持分层缓存策略，减少API调用，提升性能
 """
 
-import sqlite3
 import json
 import logging
-from datetime import datetime, timedelta, date
-from typing import Optional, Dict, Any
 import os
+import sqlite3
+from datetime import date, datetime, timedelta
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ class QuantJSONEncoder(json.JSONEncoder):
         # 处理日期对象
         if isinstance(obj, (datetime, date)):
             return obj.isoformat()
-        
+
         # 处理 pandas 的 NA 和 Timestamp
         try:
             import pandas as pd
@@ -43,7 +43,7 @@ class QuantJSONEncoder(json.JSONEncoder):
                 return bool(obj)
         except ImportError:
             pass
-            
+
         return str(obj) # 最后的兜底方案：转为字符串避免报错
 
 
@@ -123,7 +123,7 @@ class DataCache:
 
         logger.info(f"✅ 缓存数据库初始化完成: {self.db_path}")
 
-    def get(self, symbol: str, data_type: str) -> Optional[Dict[str, Any]]:
+    def get(self, symbol: str, data_type: str) -> dict[str, Any] | None:
         """
         从缓存获取数据
 
@@ -174,7 +174,7 @@ class DataCache:
         finally:
             conn.close()
 
-    def set(self, symbol: str, data_type: str, data: Dict[str, Any], ttl_seconds: int):
+    def set(self, symbol: str, data_type: str, data: dict[str, Any], ttl_seconds: int):
         """
         写入缓存
 
@@ -211,7 +211,7 @@ class DataCache:
         finally:
             conn.close()
 
-    def save_historical_valuation(self, symbol: str, date: str, valuation_data: Dict[str, Any]):
+    def save_historical_valuation(self, symbol: str, date: str, valuation_data: dict[str, Any]):
         """
         保存历史估值数据（用于计算分位数）
 
@@ -314,7 +314,7 @@ class DataCache:
         finally:
             conn.close()
 
-    def get_cache_stats(self) -> Dict[str, int]:
+    def get_cache_stats(self) -> dict[str, int]:
         """获取缓存统计信息"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -359,7 +359,7 @@ class DataCache:
             conn.close()
 
     @staticmethod
-    def _parse_float(value: Any) -> Optional[float]:
+    def _parse_float(value: Any) -> float | None:
         """安全地将值转换为float"""
         if value is None or value == 'N/A':
             return None

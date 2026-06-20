@@ -68,7 +68,7 @@ class TestMacroETFFetcherExtended:
                 fetcher = MacroETFFetcher()
                 result = fetcher.fetch("000001", "平安银行")
                 assert "global_macro_summary" in result
-                assert "N/A" != result["global_macro_summary"]
+                assert result["global_macro_summary"] != "N/A"
                 assert "us10y_yield" in result
 
     def test_openbb_import_error(self) -> None:

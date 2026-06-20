@@ -3,21 +3,20 @@
 封装现有的分析功能，提供统一的API接口
 """
 
-import sys
-import os
 import logging
+import os
+import sys
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Any
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 # 导入现有的分析模块
-from analyst_integration import fetch_stock_data
-from analyst_integration import build_enhanced_prompt
 from analyst_brain import AnalystBrain
-from valuation_analyzer import ValuationAnalyzer
+from analyst_integration import build_enhanced_prompt, fetch_stock_data
 from stock_finder import smart_stock_query
+from valuation_analyzer import ValuationAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +42,7 @@ class StockAnalyzer:
 
         logger.info("股票分析器初始化完成")
 
-    def _get_prompt(self, mode: str, data: Dict, prompt_version: str = "professional") -> str:
+    def _get_prompt(self, mode: str, data: dict, prompt_version: str = "professional") -> str:
         """
         获取分析提示词
 
@@ -86,7 +85,7 @@ class StockAnalyzer:
 
         return code, code, 'A'
 
-    def analyze_fast(self, stock_code: str, stock_name: str = "") -> Dict[str, Any]:
+    def analyze_fast(self, stock_code: str, stock_name: str = "") -> dict[str, Any]:
         """
         快速分析（Fast模式）
 
@@ -128,7 +127,7 @@ class StockAnalyzer:
             raise
 
     def analyze_deep(self, stock_code: str, stock_name: str = "",
-                     prompt_version: str = "professional") -> Dict[str, Any]:
+                     prompt_version: str = "professional") -> dict[str, Any]:
         """
         深度分析（Deep模式）
 
@@ -175,7 +174,7 @@ class StockAnalyzer:
             logger.error(f"深度分析失败: {e}", exc_info=True)
             raise
 
-    def analyze_multi_strategy(self, stock_code: str, stock_name: str = "") -> Dict[str, Any]:
+    def analyze_multi_strategy(self, stock_code: str, stock_name: str = "") -> dict[str, Any]:
         """
         多策略对比分析（MVP核心功能）
 
@@ -226,7 +225,7 @@ class StockAnalyzer:
             logger.error(f"多策略分析失败: {e}", exc_info=True)
             raise
 
-    def analyze_watchlist(self, stocks: List[Dict], mode: str = "daily") -> Dict[str, Any]:
+    def analyze_watchlist(self, stocks: list[dict], mode: str = "daily") -> dict[str, Any]:
         """
         自选股监控分析
 
@@ -300,7 +299,7 @@ class StockAnalyzer:
             logger.error(f"自选股分析失败: {e}", exc_info=True)
             raise
 
-    def analyze_valuation(self, stock_code: str, stock_name: str = "") -> Dict[str, Any]:
+    def analyze_valuation(self, stock_code: str, stock_name: str = "") -> dict[str, Any]:
         """
         估值分析
 
@@ -357,7 +356,7 @@ class StockAnalyzer:
 **免责声明**: 本报告由AI生成，仅供参考，不构成投资建议。
 """
 
-    def _format_comparison_report(self, code: str, name: str, results: Dict[str, str]) -> str:
+    def _format_comparison_report(self, code: str, name: str, results: dict[str, str]) -> str:
         """格式化多策略对比报告"""
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -390,7 +389,7 @@ class StockAnalyzer:
 """
         return report
 
-    def _format_watchlist_report(self, results: List[Dict], highlights: List[Dict], mode: str) -> str:
+    def _format_watchlist_report(self, results: list[dict], highlights: list[dict], mode: str) -> str:
         """格式化自选股监控报告"""
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         mode_name = "日报" if mode == "daily" else "周报"
@@ -422,7 +421,7 @@ class StockAnalyzer:
 
         return report
 
-    def _check_if_highlight(self, data: Dict) -> bool:
+    def _check_if_highlight(self, data: dict) -> bool:
         """
         简单的异动判断逻辑
 

@@ -3,24 +3,25 @@
 在 analyst_data.py 基础上增加智能缓存功能
 """
 
-import time
 import logging
+import time
 from datetime import datetime
-from data_cache import DataCache, CacheStrategy
+
+from analyst_base import fetch_stock_data
 from analyst_data import (
-    fetch_valuation_data,
+    fetch_chip_data,
+    fetch_competitor_data,
+    fetch_consensus_data,
+    fetch_extended_data,
+    fetch_institution_data,
+    fetch_lockup_data,
+    fetch_macro_etf_data,
+    fetch_market_env_data,
     fetch_performance_data,
     fetch_sentiment_data,
-    fetch_macro_etf_data,
-    fetch_extended_data,
-    fetch_consensus_data,
-    fetch_market_env_data,
-    fetch_lockup_data,
-    fetch_chip_data,
-    fetch_institution_data,
-    fetch_competitor_data,
+    fetch_valuation_data,
 )
-from analyst_base import fetch_stock_data
+from data_cache import CacheStrategy, DataCache
 
 logger = logging.getLogger(__name__)
 

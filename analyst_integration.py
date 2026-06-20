@@ -5,22 +5,22 @@
 """
 
 import logging
-import re
+
 from analyst_base import fetch_stock_data as fetch_base_data
 from analyst_data import (
-    fetch_valuation_data,
+    fetch_chip_data,
+    fetch_competitor_data,
+    fetch_consensus_data,
+    fetch_institution_data,
+    fetch_lockup_data,
+    fetch_macro_etf_data,
+    fetch_market_env_data,
     fetch_performance_data,
     fetch_sentiment_data,
-    fetch_macro_etf_data,
-    fetch_consensus_data,
-    fetch_market_env_data,
-    fetch_lockup_data,
-    fetch_chip_data,
-    fetch_institution_data,
-    fetch_competitor_data,
     fetch_smart_money_data,
-    fetch_theme_sentiment_data,
     fetch_support_resistance_data,
+    fetch_theme_sentiment_data,
+    fetch_valuation_data,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,7 +70,7 @@ def fetch_integrated_data(symbol: str, stock_name: str, asset_type: str = None, 
         from analyst_fund import FundAnalyst
         analyst = FundAnalyst()
         data = analyst.fetch_data(symbol, stock_name)
-        
+
         # [核心增强] 持仓穿透递归研判
         if data.get('portfolio'):
             holdings = data['portfolio']
@@ -80,15 +80,15 @@ def fetch_integrated_data(symbol: str, stock_name: str, asset_type: str = None, 
                 try:
                     from analyst_base import fetch_stock_data as fetch_base
                     from valuation_analyzer import ValuationAnalyzer
-                    
+
                     s_data = fetch_base(stock['code'], stock['name'])
-                    
+
                     # 取估值数据
                     va = ValuationAnalyzer()
                     val_data = va.fetch_current_valuation(stock['code'], stock['name'])
                     pe = val_data.get('pe_ttm') if val_data else None
                     pb = val_data.get('pb') if val_data else None
-                    
+
                     return {
                         'code': stock['code'],
                         'name': stock['name'],
@@ -110,7 +110,7 @@ def fetch_integrated_data(symbol: str, stock_name: str, asset_type: str = None, 
                 avg_score = sum(r['score'] for r in valid_results) / len(valid_results)
                 data['portfolio_health_score'] = round(avg_score, 1)
                 data['portfolio_details'] = valid_results
-                
+
                 # 计算隐含加权 PE/PB
                 valid_pe_results = [r for r in valid_results if r.get('pe') and r.get('ratio')]
                 if valid_pe_results:
@@ -118,13 +118,13 @@ def fetch_integrated_data(symbol: str, stock_name: str, asset_type: str = None, 
                     # ratio是百分点，例如 8.5 表示 8.5%
                     weighted_pe = sum(r['pe'] * r['ratio'] for r in valid_pe_results) / total_ratio
                     data['portfolio_pe'] = round(weighted_pe, 2)
-                    
+
                 valid_pb_results = [r for r in valid_results if r.get('pb') and r.get('ratio')]
                 if valid_pb_results:
                     total_ratio = sum(r['ratio'] for r in valid_pb_results)
                     weighted_pb = sum(r['pb'] * r['ratio'] for r in valid_pb_results) / total_ratio
                     data['portfolio_pb'] = round(weighted_pb, 2)
-                    
+
                 print(f"✅ 持仓穿透完成，平均健康分: {avg_score:.1f}")
                 if 'portfolio_pe' in data:
                     print(f"   --> 加权隐含 PE-TTM: {data['portfolio_pe']:.2f}, PB: {data.get('portfolio_pb', 0):.2f}")
@@ -267,7 +267,7 @@ def fetch_integrated_data(symbol: str, stock_name: str, asset_type: str = None, 
     except Exception as e:
         logger.debug(f"PEG计算失败: {e}")
 
-    logger.info(f"✅ 数据整合完成！\n")
+    logger.info("✅ 数据整合完成！\n")
 
     return integrated_data
 
@@ -592,19 +592,19 @@ def evaluate_enhanced_signals(data: dict) -> tuple:
     macd_signal = data.get('macd_signal', '')
     if '金叉' in macd_signal:
         signal_score += 2
-        triggers.append(f"✅ MACD金叉: 短期趋势转强")
+        triggers.append("✅ MACD金叉: 短期趋势转强")
     elif '死叉' in macd_signal:
         signal_score += 2
-        triggers.append(f"⚠️ MACD死叉: 短期趋势转弱")
+        triggers.append("⚠️ MACD死叉: 短期趋势转弱")
 
     # 13. 均线排列信号
     ma_alignment = data.get('ma_alignment', '')
     if '多头排列' in ma_alignment:
         signal_score += 1
-        triggers.append(f"📈 均线多头排列: 趋势向上")
+        triggers.append("📈 均线多头排列: 趋势向上")
     elif '空头排列' in ma_alignment:
         signal_score += 1
-        triggers.append(f"📉 均线空头排列: 趋势向下")
+        triggers.append("📉 均线空头排列: 趋势向下")
 
     # 14. 短期涨跌幅异常
     change_5d = data.get('change_5d')
@@ -642,7 +642,7 @@ def evaluate_enhanced_signals(data: dict) -> tuple:
     stock_sentiment = data.get('stock_sentiment', '')
     if '偏空' in stock_sentiment and '流出' in money_summary:
         signal_score += 1
-        triggers.append(f"⚠️ 情绪偏空+主力流出: 双重利空信号")
+        triggers.append("⚠️ 情绪偏空+主力流出: 双重利空信号")
 
     # ==================== 判断是否触发深度分析 ====================
 
@@ -665,23 +665,23 @@ def build_enhanced_prompt(data: dict, analysis_type: str = "worker", prompt_vers
     if asset_type in ['etf', 'fund']:
         from analyst_fund import FundAnalyst
         fund_context = FundAnalyst().get_report_context(data)
-        
+
         # 注入持仓健康度
         health_score = data.get('portfolio_health_score', 'N/A')
         health_details = data.get('portfolio_details', [])
         health_str = f"#### 5. 持仓实时穿透评估 (Live Health & Valuation)\n- **底层股票平均健康分**: {health_score}/10\n"
-        
+
         pe_str = data.get('portfolio_pe')
         pb_str = data.get('portfolio_pb')
         if pe_str:
             health_str += f"- **重仓股加权隐含 PE-TTM**: {pe_str:.2f}\n"
         if pb_str:
             health_str += f"- **重仓股加权隐含 PB**: {pb_str:.2f}\n"
-            
+
         health_str += "- **趋势状态**:\n"
         for h in health_details[:5]:
             health_str += f"  - {h['code']}: [{h['status']}] (PE:{h.get('pe', 'N/A')}, PB:{h.get('pb', 'N/A')})\n"
-            
+
         prompt = f"""
 你是一位顶级的基金量化研究员。请对以下基金进行深度研判。
 
@@ -1651,12 +1651,12 @@ if __name__ == "__main__":
     need_deep, triggers, score = evaluate_enhanced_signals(data)
 
     print(f"\n{'='*60}")
-    print(f"信号评估结果:")
+    print("信号评估结果:")
     print(f"{'='*60}")
     print(f"综合得分: {score}分")
     print(f"是否触发深度分析: {'是' if need_deep else '否'}")
     if triggers:
-        print(f"\n触发原因:")
+        print("\n触发原因:")
         for t in triggers:
             print(f"  - {t}")
 

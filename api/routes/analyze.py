@@ -3,21 +3,22 @@
 提供快速分析、深度分析、自选股监控等功能
 """
 
-from flask import Blueprint, jsonify, request
 import logging
-import sys
 import os
+import sys
+
+from flask import Blueprint, jsonify, request
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 import os
+
 import httpx
 
 # ... (保持不变)
-
 from api.utils.analyzer import StockAnalyzer
-from api.utils.validators import validate_stock_code, validate_analysis_mode
+from api.utils.validators import validate_analysis_mode, validate_stock_code
 
 bp = Blueprint('analyze', __name__)
 logger = logging.getLogger(__name__)
@@ -165,7 +166,7 @@ def analyze_deep():
         # 执行深度分析
         logger.info(f"Deep analysis requested for {stock_code} with {prompt_version}")
         result = analyzer.analyze_deep(stock_code, stock_name, prompt_version)
-        
+
         # 同步至 WikiAgent
         sync_to_wiki(topic=f"个股深度分析_{stock_code}", content=result.get("report_markdown", ""), metadata={"stock_code": stock_code, "mode": "deep"})
 
@@ -230,7 +231,7 @@ def analyze_multi_strategy():
         # 执行多策略分析
         logger.info(f"Multi-strategy analysis requested for {stock_code}")
         result = analyzer.analyze_multi_strategy(stock_code, stock_name)
-        
+
         # 同步至 WikiAgent
         sync_to_wiki(topic=f"个股多策略对比_{stock_code}", content=result.get("comparison_report", ""), metadata={"stock_code": stock_code, "mode": "multi-strategy"})
 

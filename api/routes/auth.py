@@ -3,16 +3,14 @@
 提供注册、登录、登出等功能
 """
 
-from flask import Blueprint, jsonify, request
-from flask_jwt_extended import (
-    create_access_token, create_refresh_token,
-    jwt_required, get_jwt_identity
-)
 import logging
-from datetime import datetime
 import re
+from datetime import datetime
 
-from api.models.database import db, User, UserRole
+from flask import Blueprint, jsonify, request
+from flask_jwt_extended import create_access_token, create_refresh_token, get_jwt_identity, jwt_required
+
+from api.models.database import User, UserRole, db
 
 bp = Blueprint('auth', __name__)
 logger = logging.getLogger(__name__)

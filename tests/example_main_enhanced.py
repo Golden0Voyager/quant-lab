@@ -3,15 +3,13 @@ main.py 集成示例
 展示如何将四维数据整合到现有的双脑机制中
 """
 
-import os
 import logging
+import os
+
 from openai import OpenAI
-from analyst_integration import (
-    fetch_integrated_data,
-    evaluate_enhanced_signals,
-    build_enhanced_prompt
-)
+
 from analyst_brain import AnalystBrain
+from analyst_integration import build_enhanced_prompt, evaluate_enhanced_signals, fetch_integrated_data
 
 # 配置日志
 logging.basicConfig(
@@ -82,9 +80,9 @@ def analyze_stock_with_four_dimensions(symbol: str, stock_name: str, analysis_mo
         use_deep_analysis, trigger_reasons, signal_score = evaluate_enhanced_signals(data)
 
         if use_deep_analysis:
-            print(f"🔔 触发深度分析！")
+            print("🔔 触发深度分析！")
             print(f"   综合得分: {signal_score}分")
-            print(f"   触发原因:")
+            print("   触发原因:")
             for reason in trigger_reasons:
                 print(f"      - {reason}")
             print()
@@ -115,7 +113,7 @@ def analyze_stock_with_four_dimensions(symbol: str, stock_name: str, analysis_mo
                 messages=[{"role": "user", "content": prompt}],
             )
             analysis_result = completion.choices[0].message.content
-            analysis_label = f"🤖 Worker 快速分析"
+            analysis_label = "🤖 Worker 快速分析"
 
     except Exception as e:
         logging.error(f"❌ AI分析失败: {e}")

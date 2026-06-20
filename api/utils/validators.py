@@ -3,10 +3,9 @@ API参数验证器
 """
 
 import re
-from typing import Tuple
 
 
-def validate_stock_code(code: str) -> Tuple[bool, str]:
+def validate_stock_code(code: str) -> tuple[bool, str]:
     """
     验证股票代码格式
 
@@ -45,7 +44,7 @@ def validate_stock_code(code: str) -> Tuple[bool, str]:
     return False, f"无效的股票代码格式: {code}"
 
 
-def validate_analysis_mode(mode: str) -> Tuple[bool, str]:
+def validate_analysis_mode(mode: str) -> tuple[bool, str]:
     """
     验证分析模式
 
@@ -63,7 +62,7 @@ def validate_analysis_mode(mode: str) -> Tuple[bool, str]:
     return True, ""
 
 
-def validate_watchlist_mode(mode: str) -> Tuple[bool, str]:
+def validate_watchlist_mode(mode: str) -> tuple[bool, str]:
     """
     验证自选股监控模式
 

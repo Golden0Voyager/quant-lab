@@ -4,13 +4,13 @@
 """
 
 import hashlib
-import json
 import logging
 import time
-from typing import Dict, Any, Optional
+from typing import Any
+
 import requests
 
-from api.config.payment import get_payment_config, PaymentMethod
+from api.config.payment import PaymentMethod, get_payment_config
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +23,11 @@ class PaymentError(Exception):
 class BasePaymentProvider:
     """支付服务商基类"""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         self.config = config
 
     def create_payment(self, order_no: str, amount: float, subject: str,
-                       payment_method: PaymentMethod, **kwargs) -> Dict[str, Any]:
+                       payment_method: PaymentMethod, **kwargs) -> dict[str, Any]:
         """
         创建支付订单
 
@@ -43,7 +43,7 @@ class BasePaymentProvider:
         """
         raise NotImplementedError
 
-    def verify_notify(self, data: Dict[str, Any]) -> bool:
+    def verify_notify(self, data: dict[str, Any]) -> bool:
         """
         验证支付回调
 
@@ -55,7 +55,7 @@ class BasePaymentProvider:
         """
         raise NotImplementedError
 
-    def query_order(self, order_no: str) -> Dict[str, Any]:
+    def query_order(self, order_no: str) -> dict[str, Any]:
         """
         查询订单状态
 
@@ -74,10 +74,10 @@ class PayJSProvider(BasePaymentProvider):
     文档: https://help.payjs.cn/
     """
 
-    def _sign(self, data: Dict[str, Any]) -> str:
+    def _sign(self, data: dict[str, Any]) -> str:
         """生成签名"""
         # 排序参数
-        sorted_keys = sorted([k for k in data.keys() if k != 'sign'])
+        sorted_keys = sorted([k for k in data if k != 'sign'])
         sign_str = '&'.join([f"{k}={data[k]}" for k in sorted_keys])
         sign_str += f"&key={self.config['key']}"
 
@@ -85,7 +85,7 @@ class PayJSProvider(BasePaymentProvider):
         return hashlib.md5(sign_str.encode('utf-8')).hexdigest().upper()
 
     def create_payment(self, order_no: str, amount: float, subject: str,
-                       payment_method: PaymentMethod, **kwargs) -> Dict[str, Any]:
+                       payment_method: PaymentMethod, **kwargs) -> dict[str, Any]:
         """创建PayJS支付订单"""
         try:
             # 金额转换为分
@@ -127,7 +127,7 @@ class PayJSProvider(BasePaymentProvider):
             logger.error(f"创建PayJS支付失败: {e}", exc_info=True)
             raise PaymentError(f"创建支付失败: {str(e)}")
 
-    def verify_notify(self, data: Dict[str, Any]) -> bool:
+    def verify_notify(self, data: dict[str, Any]) -> bool:
         """验证PayJS回调"""
         try:
             received_sign = data.get("sign", "")
@@ -143,7 +143,7 @@ class PayJSProvider(BasePaymentProvider):
             logger.error(f"验证PayJS回调失败: {e}", exc_info=True)
             return False
 
-    def query_order(self, order_no: str) -> Dict[str, Any]:
+    def query_order(self, order_no: str) -> dict[str, Any]:
         """查询PayJS订单状态"""
         try:
             params = {
@@ -169,7 +169,7 @@ class MockPaymentProvider(BasePaymentProvider):
     """
 
     def create_payment(self, order_no: str, amount: float, subject: str,
-                       payment_method: PaymentMethod, **kwargs) -> Dict[str, Any]:
+                       payment_method: PaymentMethod, **kwargs) -> dict[str, Any]:
         """创建模拟支付订单"""
         logger.info(f"[模拟支付] 创建订单: {order_no}, {amount}元, {subject}")
 
@@ -180,11 +180,11 @@ class MockPaymentProvider(BasePaymentProvider):
             "mock": True
         }
 
-    def verify_notify(self, data: Dict[str, Any]) -> bool:
+    def verify_notify(self, data: dict[str, Any]) -> bool:
         """验证模拟回调（总是返回True）"""
         return data.get("mock_payment") == "success"
 
-    def query_order(self, order_no: str) -> Dict[str, Any]:
+    def query_order(self, order_no: str) -> dict[str, Any]:
         """查询模拟订单（总是返回已支付）"""
         return {
             "return_code": 1,
@@ -218,22 +218,21 @@ class PaymentService:
 
     def create_payment(self, order_no: str, amount: float, subject: str,
                        payment_method: PaymentMethod = PaymentMethod.WECHAT,
-                       **kwargs) -> Dict[str, Any]:
+                       **kwargs) -> dict[str, Any]:
         """创建支付订单"""
         return self.provider.create_payment(order_no, amount, subject, payment_method, **kwargs)
 
-    def verify_notify(self, data: Dict[str, Any]) -> bool:
+    def verify_notify(self, data: dict[str, Any]) -> bool:
         """验证支付回调"""
         return self.provider.verify_notify(data)
 
-    def query_order(self, order_no: str) -> Dict[str, Any]:
+    def query_order(self, order_no: str) -> dict[str, Any]:
         """查询订单状态"""
         return self.provider.query_order(order_no)
 
 
 def generate_order_no() -> str:
     """生成订单号"""
-    import time
     import random
     timestamp = int(time.time() * 1000)
     random_num = random.randint(1000, 9999)
