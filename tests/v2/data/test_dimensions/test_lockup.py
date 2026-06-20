@@ -14,7 +14,7 @@ class TestLockupFetcher:
     def test_happy_path(self, mock_ak: MagicMock) -> None:
         mock_ak.stock_restricted_release_queue_em.return_value = pd.DataFrame(
             {
-                "解禁日期": ["2026-06-15", "2026-08-20"],
+                "解禁日期": ["2026-07-15", "2026-08-20"],
                 "解禁数量": [50000000, 120000000],
                 "占流通股比例": [2.5, 6.0],
             }
