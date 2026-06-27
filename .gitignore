@@ -65,6 +65,11 @@ watchlists.json
 # Worktrees
 .worktrees/
 
+# Caches
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
 # Coverage
 .coverage
 htmlcov/
