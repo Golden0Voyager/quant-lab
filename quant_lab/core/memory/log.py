@@ -17,7 +17,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB_PATH = os.path.expanduser("~/Code/data/quant_data/quant_cache.db")
+_DEFAULT_DB_PATH = os.path.expanduser("~/Code/quant_data/quant_cache.db")
 
 # ---------------------------------------------------------------------------
 # Schema
