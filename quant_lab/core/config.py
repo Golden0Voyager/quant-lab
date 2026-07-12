@@ -81,10 +81,23 @@ class QuantLabSettings(BaseSettings):
         default=None,
         description="Report output directory; None → ./Report",
     )
+    core_db_path: str | None = Field(
+        default=None,
+        description="SQLite path for main quant core DB; None -> shared quant_data/quant_core.db",
+    )
 
     # ------------------------------------------------------------------
     # Computed properties
     # ------------------------------------------------------------------
+    @property
+    def resolved_core_db_path(self) -> str:
+        """Return the absolute path to the quant_core.db database file."""
+        import os
+        if self.core_db_path:
+            return os.path.abspath(self.core_db_path)
+        shared_dir = os.path.expanduser("~/Code/quant_data")
+        return os.path.join(shared_dir, "quant_core.db")
+
     @property
     def default_model(self) -> str:
         """Return the effective default model ID.
