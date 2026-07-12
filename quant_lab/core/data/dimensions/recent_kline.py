@@ -16,9 +16,39 @@ logger = logging.getLogger(__name__)
 
 
 def _fetch_kline_df(symbol: str) -> pd.DataFrame | None:
-    """Fetch K-line DataFrame with fallback chain (eastmoney → sina → tencent)."""
+    """Fetch K-line DataFrame from local database (优先), falling back to online APIs."""
+    import os
+    import sqlite3
+    from quant_lab.core.config import get_settings
+
     end_date = datetime.now().strftime("%Y%m%d")
     start_date = (datetime.now() - timedelta(days=60)).strftime("%Y%m%d")
+
+    # 策略0: 本地 SQLite 数据库
+    try:
+        settings = get_settings()
+        db_path = settings.resolved_core_db_path
+        if os.path.exists(db_path):
+            db_start = f"{start_date[:4]}-{start_date[4:6]}-{start_date[6:]}"
+            db_end = f"{end_date[:4]}-{end_date[4:6]}-{end_date[6:]}"
+            conn = sqlite3.connect(db_path)
+            query = """
+            SELECT trade_date as 日期, open as 开盘, close as 收盘, high as 最高, low as 最低,
+                   volume as 成交量, amount as 成交额, turnover_rate as 换手率,
+                   pct_change as 涨跌幅, amplitude as 振幅
+            FROM daily_bars
+            WHERE ts_code = ? AND trade_date >= ? AND trade_date <= ?
+            ORDER BY trade_date ASC
+            """
+            df = pd.read_sql_query(query, conn, params=(symbol, db_start, db_end))
+            conn.close()
+            if df is not None and len(df) >= 20:
+                if "日期" in df.columns:
+                    df["日期"] = df["日期"].astype(str)
+                logger.info("Loaded %d K-line records for %s from local database.", len(df), symbol)
+                return df
+    except Exception as e:
+        logger.debug("Failed to fetch K-line for %s from local database: %s", symbol, e)
 
     # 策略1: 东财
     try:
