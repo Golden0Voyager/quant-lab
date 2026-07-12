@@ -6,9 +6,13 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any
 
+import os
+import sqlite3
+
 import akshare as ak  # type: ignore[import-untyped]
 import pandas as pd  # type: ignore[import-untyped]
 
+from quant_lab.core.config import get_settings
 from quant_lab.core.data.dimensions.base import safe_fetch
 from quant_lab.core.data.sources._utils import no_proxy, safe_float
 
@@ -17,10 +21,6 @@ logger = logging.getLogger(__name__)
 
 def _fetch_kline_df(symbol: str) -> pd.DataFrame | None:
     """Fetch K-line DataFrame from local database (优先), falling back to online APIs."""
-    import os
-    import sqlite3
-    from quant_lab.core.config import get_settings
-
     end_date = datetime.now().strftime("%Y%m%d")
     start_date = (datetime.now() - timedelta(days=60)).strftime("%Y%m%d")
 
