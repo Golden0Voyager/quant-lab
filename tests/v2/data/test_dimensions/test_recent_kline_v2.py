@@ -1,12 +1,16 @@
-"""Extended tests for RecentKlineFetcher — covering uncovered branches."""
-
-from __future__ import annotations
-
+from collections.abc import Generator
 from unittest.mock import MagicMock, patch
 
 import pandas as pd  # type: ignore[import-untyped]
+import pytest
 
 from quant_lab.core.data.dimensions.recent_kline import RecentKlineFetcher
+
+
+@pytest.fixture(autouse=True)
+def mock_db_not_exists() -> Generator[None, None, None]:
+    with patch("quant_lab.core.data.dimensions.recent_kline.os.path.exists", return_value=False):
+        yield
 
 
 class TestRecentKlineFetcherV2:
