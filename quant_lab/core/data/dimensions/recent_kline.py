@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
-from typing import Any
-
 import os
 import sqlite3
+from datetime import datetime, timedelta
+from typing import Any
 
 import akshare as ak  # type: ignore[import-untyped]
 import pandas as pd  # type: ignore[import-untyped]
