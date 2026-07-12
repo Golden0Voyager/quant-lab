@@ -1,12 +1,16 @@
-"""Tests for RecentKlineFetcher."""
-
-from __future__ import annotations
-
+from typing import Generator
 from unittest.mock import MagicMock, patch
 
 import pandas as pd  # type: ignore[import-untyped]
+import pytest
 
 from quant_lab.core.data.dimensions.recent_kline import RecentKlineFetcher
+
+
+@pytest.fixture(autouse=True)
+def mock_db_not_exists() -> Generator[None, None, None]:
+    with patch("quant_lab.core.data.dimensions.recent_kline.os.path.exists", return_value=False):
+        yield
 
 
 class TestRecentKlineFetcher:
@@ -101,3 +105,89 @@ class TestRecentKlineFetcher:
 
         assert result["boll_position"] > 0
         assert isinstance(result["boll_status"], str)
+
+    @patch("quant_lab.core.data.dimensions.recent_kline.ak")
+    @patch("quant_lab.core.data.dimensions.recent_kline.sqlite3")
+    @patch("quant_lab.core.data.dimensions.recent_kline.os.path.exists")
+    @patch("quant_lab.core.data.dimensions.recent_kline.get_settings")
+    def test_db_loading_happy_path(
+        self,
+        mock_settings: MagicMock,
+        mock_exists: MagicMock,
+        mock_sqlite3: MagicMock,
+        mock_ak: MagicMock,
+    ) -> None:
+        """K-line successfully loaded from local database, AkShare not called."""
+        mock_settings.return_value.resolved_core_db_path = "/fake/quant_core.db"
+        mock_exists.return_value = True
+
+        dates = pd.date_range("2026-04-01", periods=25, freq="D").strftime("%Y-%m-%d")
+        mock_conn = MagicMock()
+        mock_sqlite3.connect.return_value = mock_conn
+
+        # Mock pd.read_sql_query to return a valid DataFrame
+        with patch("pandas.read_sql_query") as mock_read_sql:
+            mock_read_sql.return_value = pd.DataFrame(
+                {
+                    "日期": dates,
+                    "开盘": [10.0] * 25,
+                    "收盘": list(range(10, 35)),
+                    "最高": [11.0] * 25,
+                    "最低": [9.0] * 25,
+                    "涨跌幅": [1.0] * 25,
+                    "成交量": [1000] * 25,
+                    "成交额": [50000] * 25,
+                    "换手率": [1.5] * 25,
+                    "振幅": [2.0] * 25,
+                }
+            )
+
+            fetcher = RecentKlineFetcher()
+            result = fetcher.fetch("000001", "平安银行")
+
+            assert "_error" not in result
+            assert len(result["recent_20d_data"]) == 20
+            # Akshare should NOT have been called since DB was successful
+            mock_ak.stock_zh_a_hist.assert_not_called()
+            mock_sqlite3.connect.assert_called_once_with("/fake/quant_core.db")
+
+    @patch("quant_lab.core.data.dimensions.recent_kline.ak")
+    @patch("quant_lab.core.data.dimensions.recent_kline.sqlite3")
+    @patch("quant_lab.core.data.dimensions.recent_kline.os.path.exists")
+    @patch("quant_lab.core.data.dimensions.recent_kline.get_settings")
+    def test_db_loading_fallback(
+        self,
+        mock_settings: MagicMock,
+        mock_exists: MagicMock,
+        mock_sqlite3: MagicMock,
+        mock_ak: MagicMock,
+    ) -> None:
+        """Local database fails or has no data → falls back to AkShare."""
+        mock_settings.return_value.resolved_core_db_path = "/fake/quant_core.db"
+        mock_exists.return_value = True
+
+        mock_sqlite3.connect.side_effect = Exception("DB connection error")
+
+        dates = pd.date_range("2026-04-01", periods=25, freq="D").strftime("%Y-%m-%d")
+        mock_ak.stock_zh_a_hist.return_value = pd.DataFrame(
+            {
+                "日期": dates,
+                "开盘": [10.0] * 25,
+                "收盘": list(range(10, 35)),
+                "最高": [11.0] * 25,
+                "最低": [9.0] * 25,
+                "涨跌幅": [1.0] * 25,
+                "成交量": [1000] * 25,
+                "成交额": [50000] * 25,
+                "换手率": [1.5] * 25,
+            }
+        )
+
+        fetcher = RecentKlineFetcher()
+        result = fetcher.fetch("000001", "平安银行")
+
+        assert "_error" not in result
+        assert len(result["recent_20d_data"]) == 20
+        # Akshare should be called as fallback
+        mock_ak.stock_zh_a_hist.assert_called_once()
+
