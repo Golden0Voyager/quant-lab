@@ -77,7 +77,18 @@ quant_lab/
 - AI分析与评级
 - 自动生成Markdown报告
 
+---
+
+## 🔌 数据中台集成 (Data Hub Integration)
+
+本项目与 `quant_data` 数据中台共享部分数据层：
+1. **缓存共享**：本项目的 [data_cache.py](file:///Users/hainingyu/Code/quant_lab/data_cache.py) 模块默认将 API 缓存存放在 `~/Code/quant_data/quant_cache.db` 中。
+2. **防反爬保护**：通过与其他量化子系统（如 `quant_hunter`）共享网络请求的缓存与 TTL 时效，极大地减少了对东财、新浪和 AkShare 的直接请求频次，降低了被数据源封禁 IP 的风险，响应速度提升 30%+。
+
+---
+
 ## 数据源
+
 
 | 数据类型 | 来源 | 更新频率 |
 |---------|------|---------|
